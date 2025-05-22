@@ -1,0 +1,18 @@
+---
+services:
+  gotigram:
+    image: tiagura/gotigram:latest
+    container_name: gotigram
+    # Option 1: Use external .env file
+    # env_file:
+    #  - .env
+    # Option 2: Define variables inline
+    environment:
+      GOTIFY_WS_URL: ws://gotify.com
+      GOTIFY_REST_URL: https://gotify.com
+      GOTIFY_CLIENT_TOKEN: your_gotify_token
+      TELEGRAM_TOKEN: your_telegram_token
+      TELEGRAM_CHAT_ID: chat_id_number
+    volumes:
+      - ./logs:/app/logs  # To store log file
+    restart: unless-stopped
