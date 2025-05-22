@@ -1,4 +1,5 @@
-# Gotigram
+<img align="center" src="images/logo_background.png" alt="logo" width="600"/>
+<h1 align="center">Gotigram</h1>
 
 Gotigram is a standalone Telegram bot that bridges your [Gotify](https://gotify.net) notifications directly to your [Telegram](https://telegram.org) DMs. It's designed to selectively forward messages from specific Gotify applications to Telegram, giving you full control over what gets pushed.
 
@@ -90,13 +91,12 @@ To start receiving Gotify messages in Telegram, you must subscribe to specific a
 
 ### Example
 
- ![Example](imgs/subscribe_example.png).
+<img src="images/subscribe_example.png" alt="subscribe_example" width="500"/>
 
 ## 🛠️ To-Do
 
-- [ ] Add support for priority-based subscriptions  
-  Allow users to subscribe to a Gotify application **and specify a minimum message priority**.  
-  Only messages with that priority or higher will be pushed to Telegram.
+- Add support for priority-based subscriptions  
+  Allow users to subscribe to a Gotify application **and specify a minimum message priority**. Only messages with that priority or higher will be pushed to Telegram.
 
 ## 🧾 License
 
