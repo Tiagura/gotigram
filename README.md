@@ -1,4 +1,7 @@
-<img align="center" src="images/logo_background.png" alt="logo" width="600"/>
+<p align="center">
+  <img src="images/logo_background.png" alt="logo" width="150"/>
+</p>
+
 <h1 align="center">Gotigram</h1>
 
 Gotigram is a standalone Telegram bot that bridges your [Gotify](https://gotify.net) notifications directly to your [Telegram](https://telegram.org) DMs. It's designed to selectively forward messages from specific Gotify applications to Telegram, giving you full control over what gets pushed.
