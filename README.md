@@ -46,7 +46,7 @@ Before using Gotigram, ensure you have the following:
 ### Option 1: Run Locally
 
 ```bash
-git clone https://github.com/your-username/gotigram.git
+git clone https://github.com/Tiagura/gotigram.git
 cd gotigram
 pip3 install -r requirements
 python3 main.py
@@ -56,15 +56,17 @@ python3 main.py
 
 #### Using a local build
 
-Example file: local-docker-compose.yml
+[Example file](local-docker-compose.yml)
 
 ```bash
+git clone https://github.com/Tiagura/gotigram.git
+cd gotigram
 docker-compose -f local-docker-compose.yml up -d
 ```
 
 #### Using Docker Hub image
 
-Example file: docker-compose.yml
+[Example file](docker-compose.yml)
 
 ```bash
 docker-compose -f docker-compose.yml up -d
