@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="images/logo_background.png" alt="logo" width="150"/>
+  <img src="images/logo_no_background.png" alt="logo" width="150"/>
 </p>
 
 <h1 align="center">Gotigram</h1>
