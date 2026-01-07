@@ -38,7 +38,7 @@ Before using Gotigram, ensure you have the following:
    - Start a conversation with your bot (send `/start`)  
    - Visit: `https://api.telegram.org/bot<TELEGRAM_TOKEN>/getUpdates`  
      *(replace `<TELEGRAM_TOKEN>` with your actual token)*  
-   - Your `chat.id` will appear in the response — that’s your `TELEGRAM_CHAT_ID`.
+   - Your `chat id` will appear in the response — that’s your `TELEGRAM_CHAT_ID`.
 
 
 ## 🚀 Getting Started
@@ -48,8 +48,18 @@ Before using Gotigram, ensure you have the following:
 ```bash
 git clone https://github.com/Tiagura/gotigram.git
 cd gotigram
-pip3 install -r requirements
-python3 main.py
+
+go mod tidy
+
+go build -o gotigram main.go
+
+export GOTIFY_WS_URL=ws://<GOTIFY_SERVER>:<WS_PORT>
+export GOTIFY_REST_URL=http(s)://<GOTIFY_SERVER>:<REST_PORT>
+export GOTIFY_CLIENT_TOKEN=<YOUR_GOTIFY_CLIENT_TOKEN>
+export TELEGRAM_TOKEN=<YOUR_TELEGRAM_BOT_TOKEN>
+export TELEGRAM_CHAT_ID=<YOUR_TELEGRAM_CHAT_ID>
+
+./gotigram
 ```
 
 ### Option 2: Run via Docker
@@ -79,11 +89,13 @@ Once the bot is running, open a Telegram chat with it and send the `/start` comm
 
 ### Available Commands
 
-- `/help` – Show help message  
-- `/subscribe <app_id>` – Subscribe to an application  
-- `/unsubscribe <app_id>` – Unsubscribe from an application  
-- `/subscriptions` – Show current subscriptions  
-- `/apps` – List all applications on your Gotify server  
+- `/help` - Show help message  
+- `/subscribe <app_id>[,<priority>]` - Subscribe to a specific application by its ID. Optionally set a priority (0–10). Defaults to 0. 
+- `/subscribe all` - Subscribe to all available applications. Optionally set a priority (0–10). Defaults to 0.
+- `/unsubscribe <app_id>` - Unsubscribe from a specific application by its ID. 
+- `/unsubscribe all` - Unsubscribe from all current subscriptions.
+- `/subscriptions` - Show a list of your current subscriptions, including priority.
+- `/apps` - List all applications on the Gotify server, with subscription status.
 
 
 ## 📥 Subscribing to Applications
@@ -97,11 +109,6 @@ To start receiving Gotify messages in Telegram, you must subscribe to specific a
 ### Example
 
 <img src="images/subscribe_example.png" alt="subscribe_example" width="500"/>
-
-## 🛠️ To-Do
-
-- Add support for priority-based subscriptions  
-  Allow users to subscribe to a Gotify application **and specify a minimum message priority**. Only messages with that priority or higher will be pushed to Telegram.
 
 ## 🧾 License
 

@@ -7,9 +7,10 @@ on:
     tags:
       - "v*.*.*"
     paths:
-      - 'main.py'
+      - 'main.go'
       - 'Dockerfile'
-      - 'requirements.txt'
+      - 'go.mod'
+      - 'go.sum'
       - '.github/workflows/docker-publish.yml'
 
 jobs:

@@ -8,11 +8,11 @@ services:
     #  - .env
     # Option 2: Define variables inline
     environment:
-      GOTIFY_WS_URL: ws://gotify.com
-      GOTIFY_REST_URL: https://gotify.com
-      GOTIFY_CLIENT_TOKEN: your_gotify_token
-      TELEGRAM_TOKEN: your_telegram_token
-      TELEGRAM_CHAT_ID: chat_id_number
+      GOTIFY_WS_URL: ws://<GOTIFY_SERVER>:<WS_PORT>
+      GOTIFY_REST_URL: http(s)://<GOTIFY_SERVER>:<REST_PORT>
+      GOTIFY_CLIENT_TOKEN: <GOTIFY_CLIENT_TOKEN>
+      TELEGRAM_TOKEN: <TELEGRAM_TOKEN>
+      TELEGRAM_CHAT_ID: <TELEGRAM_CHAT_ID>
     volumes:
       - ./logs:/app/logs  # To store log file
     restart: unless-stopped

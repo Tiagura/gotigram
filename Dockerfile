@@ -1,18 +1,23 @@
-# Use official Python 3.11 Alpine image
-FROM python:3.11-alpine
+FROM golang:1.21-alpine AS build
 
-# Install build dependencies needed for some packages
-RUN apk add --no-cache gcc musl-dev libffi-dev openssl-dev
+RUN apk add --no-cache git
 
 WORKDIR /app
 
-# Copy requirements and install dependencies
-COPY requirements.txt .
+COPY go.mod go.sum ./
 
-RUN pip install --no-cache-dir -r requirements.txt
+RUN go mod download
 
-# Copy application code only
-COPY main.py .
+COPY main.go ./
 
-# Default command to run your bot
-CMD ["python3", "main.py"]
+RUN go build -o gotigram main.go
+
+# --- Minimal runtime image ---
+
+FROM alpine:latest
+
+WORKDIR /app
+
+COPY --from=build /app/gotigram .
+
+CMD ["./gotigram"]
