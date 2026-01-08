@@ -2,13 +2,32 @@
   <img src="images/logo_no_background.png" alt="logo" width="150"/>
 </p>
 
-<h1 align="left">Gotigram</h1>
+<h1 align="center">Gotigram</h1>
 
 Gotigram is a standalone Telegram bot that bridges your [Gotify](https://gotify.net) notifications directly to your [Telegram](https://telegram.org) DMs. It's designed to selectively forward messages from specific Gotify applications to Telegram, giving you full control over what gets pushed.
 
 > **Note:** Gotigram is a separate application and not a Gotify plugin.
 
----
+## Table of Contents
+
+- [Table of Contents](#table-of-contents)
+- [📋 Prerequisites](#-prerequisites)
+  - [Required Environment Variables](#required-environment-variables)
+  - [Optional Subscriptions Configuration File](#optional-subscriptions-configuration-file)
+    - [Enabling the Config File](#enabling-the-config-file)
+    - [JSON File Format](#json-file-format)
+- [🔧 How to Get Your Telegram Token and Chat ID](#-how-to-get-your-telegram-token-and-chat-id)
+- [🚀 Getting Started](#-getting-started)
+  - [Option 1: Run Locally](#option-1-run-locally)
+  - [Option 2: Run via Docker](#option-2-run-via-docker)
+    - [Using a local build](#using-a-local-build)
+    - [Using Docker Hub image](#using-docker-hub-image)
+- [💬 Bot Usage](#-bot-usage)
+  - [Available Commands](#available-commands)
+- [📥 Subscribing to Applications](#-subscribing-to-applications)
+  - [Example](#example)
+- [🧾 License](#-license)
+- [🤝 Contributing](#-contributing)
 
 ## 📋 Prerequisites
 
@@ -16,6 +35,8 @@ Before using Gotigram, ensure you have the following:
 
 - A running **Gotify server**
 - A **Telegram bot**
+
+To connect Gotigram to these services, you must provide certain configuration values via environment variables.
 
 ### Required Environment Variables
 
@@ -27,6 +48,46 @@ Before using Gotigram, ensure you have the following:
 | `TELEGRAM_TOKEN`      | Token for your Telegram bot                                                            |
 | `TELEGRAM_CHAT_ID`    | Your personal Telegram chat ID                                                         |
 
+### Optional Subscriptions Configuration File
+
+Gotigram can optionally preload subscriptions at startup from a JSON configuration file. This allows you to define which applications should be subscribed automatically, without manually sending commands in Telegram after each restart.
+
+#### Enabling the Config File
+
+Set the following optional environment variable:
+
+| Variable             | Description                                             |
+| -------------------- | ------------------------------------------------------- |
+| `SUBSCRIPTIONS_FILE` | Path to a JSON file containing predefined subscriptions. If not set, Gotigram uses a default file (`/app/subscriptions.json` inside containers). |
+
+- If the file exists and contains valid subscriptions, they will be loaded automatically on startup.
+- If the file is missing or empty, Gotigram will start normally with no subscriptions.
+- Update and save the subscriptions to a file at any time using the '/save' command.
+
+#### JSON File Format
+
+The file must contain a JSON array of subscription objects, which have the following structure:
+
+| Field      | Required | Description                                                                                     |
+| ---------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `ID`       | Yes      | Gotify application ID                                                                           |
+| `Name`     | No       | Human-readable application name (used in Telegram messages; defaults to `""` if omitted)        |
+| `Priority` | No       | Minimum priority (0–10) for notifications. Defaults to `0`                                      |
+
+
+Example `subscriptions.json`
+```json
+[
+  {
+    "ID": 1,
+    "Name": "App Name 1"
+  },
+  {
+    "ID": 3,
+    "Priority": 2
+  }
+]
+```
 
 ## 🔧 How to Get Your Telegram Token and Chat ID
 
@@ -58,6 +119,7 @@ export GOTIFY_REST_URL=http(s)://<GOTIFY_SERVER>:<REST_PORT>
 export GOTIFY_CLIENT_TOKEN=<YOUR_GOTIFY_CLIENT_TOKEN>
 export TELEGRAM_TOKEN=<YOUR_TELEGRAM_BOT_TOKEN>
 export TELEGRAM_CHAT_ID=<YOUR_TELEGRAM_CHAT_ID>
+export SUBSCRIPTIONS_FILE=<path/to/json>  # Optional to set
 
 ./gotigram
 ```
@@ -71,7 +133,7 @@ export TELEGRAM_CHAT_ID=<YOUR_TELEGRAM_CHAT_ID>
 ```bash
 git clone https://github.com/Tiagura/gotigram.git
 cd gotigram
-docker-compose -f local-docker-compose.yml up -d
+docker compose -f local-docker-compose.yml up -d
 ```
 
 #### Using Docker Hub image
@@ -79,9 +141,8 @@ docker-compose -f local-docker-compose.yml up -d
 [Example file](docker-compose.yml)
 
 ```bash
-docker-compose -f docker-compose.yml up -d
+docker compose -f docker-compose.yml up -d
 ```
-
 
 ## 💬 Bot Usage
 
@@ -90,13 +151,13 @@ Once the bot is running, open a Telegram chat with it and send the `/start` comm
 ### Available Commands
 
 - `/help` - Show help message  
-- `/subscribe <app_id>[,<priority>]` - Subscribe to a specific application by its ID. Optionally set a priority (0–10). Defaults to 0. 
-- `/subscribe all` - Subscribe to all available applications. Optionally set a priority (0–10). Defaults to 0.
-- `/unsubscribe <app_id>` - Unsubscribe from a specific application by its ID. 
-- `/unsubscribe all` - Unsubscribe from all current subscriptions.
-- `/subscriptions` - Show a list of your current subscriptions, including priority.
 - `/apps` - List all applications on the Gotify server, with subscription status.
-
+- `/subscribe <app_id|all>[,<priority>]` - Subscribe to a specific application by its ID, or to all applications using all. Optionally set a priority (0–10); defaults to 0.
+- `/subscriptions` - Show a list of your current subscriptions, including priority.
+- `/unsubscribe <app_id|app_id1,app_id2,...|all>` - Unsubscribe from one or more applications (comma-separated IDs) or from all subscriptions using all.
+- `/export` - Export the current subscriptions as a JSON array directly in the Telegram chat.
+- `/import` - Import subscriptions from a JSON array
+- `/save` - Save the current subscriptions to the configured subscriptions file (`SUBSCRIPTIONS_FILE`) for automatic loading on next startup.
 
 ## 📥 Subscribing to Applications
 

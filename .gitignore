@@ -35,6 +35,9 @@ logs/
 .env.local
 .env.test
 
+# Config files
+*.json
+
 # -----------------------------
 # Editor / IDE
 # -----------------------------

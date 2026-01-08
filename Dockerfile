@@ -20,4 +20,4 @@ WORKDIR /app
 
 COPY --from=build /app/gotigram .
 
-CMD ["./gotigram"]
+ENTRYPOINT ["./gotigram"]

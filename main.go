@@ -42,6 +42,7 @@ var (
 	GOTIFY_CLIENT_TOKEN = mustEnv("GOTIFY_CLIENT_TOKEN")
 	TELEGRAM_TOKEN      = mustEnv("TELEGRAM_TOKEN")
 	TELEGRAM_CHAT_ID    = mustInt64(mustEnv("TELEGRAM_CHAT_ID"))
+	SUBSCRIPTIONS_FILE  = getSubscriptionsFile()
 
 	subscriptions = make(map[int]Subscription)
 	subMu         sync.RWMutex
@@ -67,6 +68,69 @@ func mustInt64(s string) int64 {
 	return v
 }
 
+func loadSubscriptionsFromFile(path string) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		log.Printf("Failed to read subscriptions file %s: %v", path, err)
+		return
+	}
+
+	var subs []Subscription
+	if err := json.Unmarshal(data, &subs); err != nil {
+		log.Printf("Failed to parse subscriptions JSON from %s: %v", path, err)
+		return
+	}
+
+	// Fetch current Gotify applications
+	apps, err := fetchApps()
+	if err != nil {
+		log.Printf("Failed to fetch Gotify apps while loading subscriptions: %v", err)
+		return
+	}
+
+	// Build a map for quick lookup
+	appIDs := make(map[int]string)
+	for _, app := range apps {
+		appIDs[app.ID] = app.Name
+	}
+
+	subMu.Lock()
+	defer subMu.Unlock()
+
+	added := 0
+	for _, sub := range subs {
+		// Validate priority
+		if sub.Priority < 0 || sub.Priority > 10 {
+			log.Printf("Invalid priority %d for app ID %d in subscriptions file", sub.Priority, sub.ID)
+			continue
+		}
+
+		// Check if app ID exists
+		name, exists := appIDs[sub.ID]
+		if !exists {
+			log.Printf("Skipping subscription for unknown app ID %d", sub.ID)
+			continue
+		}
+
+		subscriptions[sub.ID] = Subscription{
+			ID:       sub.ID,
+			Name:     name, // ensure we use the correct name from Gotify
+			Priority: sub.Priority,
+		}
+		added++
+	}
+
+	log.Printf("Loaded %d subscriptions from %s", added, path)
+}
+
+func getSubscriptionsFile() string {
+	path := os.Getenv("SUBSCRIPTIONS_FILE")
+	if path == "" {
+		path = "subscriptions.json" // default path if not set
+	}
+	return path
+}
+
 /* -------------------
    Main
 ------------------- */
@@ -79,6 +143,13 @@ func main() {
 
 	log.Printf("Authorized as %s", bot.Self.UserName)
 
+	log.Printf("Subscriptions file: %s", SUBSCRIPTIONS_FILE)
+
+	// Load subscriptions from file if specified
+	if SUBSCRIPTIONS_FILE != "" {
+		loadSubscriptionsFromFile(SUBSCRIPTIONS_FILE)
+	}
+
 	// Start WebSocket listener concurrently
 	go listenGotify(bot)
 
@@ -90,12 +161,13 @@ func main() {
    Telegram Bot
 ------------------- */
 
-const helpText = `/subscribe <app_id>,<priority, default 0>
-/subscribe all,<priority, default 0>
-/unsubscribe <app_id>
-/unsubscribe all
+const helpText = `/apps
+/subscribe <app_id|all>[,<priority, default 0>]
 /subscriptions
-/apps
+/unsubscribe <app_id|app_id1,app_id2,...|all>
+/import <json_array>
+/export
+/save
 `
 
 func startTelegram(bot *tgbotapi.BotAPI) {
@@ -121,6 +193,12 @@ func startTelegram(bot *tgbotapi.BotAPI) {
 			handleSubscriptions(bot, update)
 		case "apps":
 			handleApps(bot, update)
+		case "import":
+			handleImport(bot, update)
+		case "export":
+			handleExport(bot, update)
+		case "save":
+			handleSave(bot, update)
 		default:
 			reply(bot, update, "Unknown command. Use /help for a list of commands.")
 		}
@@ -216,47 +294,58 @@ func handleSubscribe(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 func handleUnsubscribe(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	arg := strings.TrimSpace(update.Message.CommandArguments())
 	if arg == "" {
-		reply(bot, update, "Usage: /unsubscribe <app_id|all>")
+		reply(bot, update, "Usage: /unsubscribe <app_id|id1,id2,...|all>")
 		return
 	}
 
 	subMu.Lock()
 	defer subMu.Unlock()
 
-	remove := func(id int, name string) string {
-		if _, ok := subscriptions[id]; !ok {
-			return fmt.Sprintf("You are not subscribed to %s (ID %d)", name, id)
+	remove := func(id int) string {
+		sub, ok := subscriptions[id]
+		if !ok {
+			return fmt.Sprintf("You are not subscribed to application ID %d", id)
 		}
 		delete(subscriptions, id)
-		return fmt.Sprintf("Unsubscribed from %s (ID %d)", name, id)
+		return fmt.Sprintf("Unsubscribed from %s (ID %d)", sub.Name, id)
 	}
 
+	// Case: /unsubscribe all
 	if strings.EqualFold(arg, "all") {
 		if len(subscriptions) == 0 {
 			reply(bot, update, "You have no subscriptions to remove")
 			return
 		}
+
 		var messages []string
-		for _, sub := range subscriptions {
-			messages = append(messages, remove(sub.ID, sub.Name))
+		for id := range subscriptions {
+			messages = append(messages, remove(id))
 		}
+
 		reply(bot, update, strings.Join(messages, "\n"))
 		return
 	}
 
-	appID, err := strconv.Atoi(arg)
-	if err != nil || appID <= 0 {
-		reply(bot, update, "Invalid app ID")
-		return
+	// Case: /unsubscribe id1,id2,...
+	parts := strings.Split(arg, ",")
+	var messages []string
+
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		id, err := strconv.Atoi(part)
+		if err != nil || id <= 0 {
+			messages = append(messages, fmt.Sprintf("Invalid app ID: %s", part))
+			continue
+		}
+
+		messages = append(messages, remove(id))
 	}
 
-	sub, ok := subscriptions[appID]
-	if !ok {
-		reply(bot, update, fmt.Sprintf("You are not subscribed to application ID %d", appID))
-		return
-	}
-
-	reply(bot, update, remove(appID, sub.Name))
+	reply(bot, update, strings.Join(messages, "\n"))
 }
 
 func handleSubscriptions(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
@@ -317,6 +406,133 @@ func handleApps(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	}
 
 	reply(bot, update, "Available applications:\n"+strings.Join(lines, "\n"))
+}
+
+func handleImport(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	arg := strings.TrimSpace(update.Message.CommandArguments())
+	if arg == "" {
+		reply(bot, update, "Usage: /import <JSON array of subscriptions>")
+		return
+	}
+
+	var subs []Subscription
+	if err := json.Unmarshal([]byte(arg), &subs); err != nil {
+		reply(bot, update, "Invalid JSON: "+err.Error())
+		return
+	}
+
+	// Fetch current Gotify applications
+	apps, err := fetchApps()
+	if err != nil {
+		reply(bot, update, "Failed to fetch Gotify apps: "+err.Error())
+		return
+	}
+
+	// Build a map of valid app IDs and names
+	appIDs := make(map[int]string)
+	for _, app := range apps {
+		appIDs[app.ID] = app.Name
+	}
+
+	subMu.Lock()
+	defer subMu.Unlock()
+
+	added := 0
+	var warnings []string
+
+	for _, sub := range subs {
+		if sub.ID <= 0 {
+			warnings = append(warnings, fmt.Sprintf("Skipping invalid app ID %d", sub.ID))
+			continue
+		}
+
+		// Check if app exists
+		name, exists := appIDs[sub.ID]
+		if !exists {
+			warnings = append(warnings, fmt.Sprintf("Skipping unknown app ID %d", sub.ID))
+			continue
+		}
+
+		// Validate priority
+		if sub.Priority < 0 || sub.Priority > 10 {
+			warnings = append(warnings, fmt.Sprintf("Priority %d for app ID %d is invalid, setting to 0", sub.Priority, sub.ID))
+			sub.Priority = 0
+		}
+
+		subscriptions[sub.ID] = Subscription{
+			ID:       sub.ID,
+			Name:     name, // use Gotify app name
+			Priority: sub.Priority,
+		}
+		added++
+	}
+
+	msg := fmt.Sprintf("Imported %d subscriptions successfully.", added)
+	if len(warnings) > 0 {
+		msg += "\nWarnings:\n" + strings.Join(warnings, "\n")
+	}
+
+	reply(bot, update, msg)
+}
+
+func handleExport(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	subMu.RLock()
+	if len(subscriptions) == 0 {
+		subMu.RUnlock()
+		reply(bot, update, "There are no subscriptions to export.")
+		return
+	}
+
+	// Copy to slice for stable export
+	export := make([]Subscription, 0, len(subscriptions))
+	for _, sub := range subscriptions {
+		export = append(export, sub)
+	}
+	subMu.RUnlock()
+
+	data, err := json.MarshalIndent(export, "", "  ")
+	if err != nil {
+		reply(bot, update, "Failed to export subscriptions.")
+		return
+	}
+
+	msg := tgbotapi.NewMessage(
+		update.Message.Chat.ID,
+		"```json\n"+string(data)+"\n```",
+	)
+	msg.ParseMode = "Markdown"
+
+	bot.Send(msg)
+}
+
+func handleSave(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	subMu.RLock()
+	defer subMu.RUnlock()
+
+	if len(subscriptions) == 0 {
+		reply(bot, update, "No subscriptions to save.")
+		return
+	}
+
+	// Create slice for JSON
+	var subs []Subscription
+	for _, sub := range subscriptions {
+		subs = append(subs, sub)
+	}
+
+	data, err := json.MarshalIndent(subs, "", "  ")
+	if err != nil {
+		reply(bot, update, fmt.Sprintf("Failed to serialize subscriptions: %v", err))
+		return
+	}
+
+	err = os.WriteFile(SUBSCRIPTIONS_FILE, data, 0644)
+	if err != nil {
+		reply(bot, update, fmt.Sprintf("Failed to save subscriptions to %s: %v", SUBSCRIPTIONS_FILE, err))
+		return
+	}
+
+	reply(bot, update, fmt.Sprintf("Saved %d subscriptions to %s", len(subs), SUBSCRIPTIONS_FILE))
 }
 
 /* -------------------
