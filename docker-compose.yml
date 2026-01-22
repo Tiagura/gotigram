@@ -2,6 +2,7 @@ services:
   gotigram:
     image: tiagura/gotigram:latest
     container_name: gotigram
+    user: "${UID}:${GID}"
     # Option 1: Use external .env file
     # env_file:
     #  - .env
@@ -13,9 +14,9 @@ services:
       TELEGRAM_TOKEN: <TELEGRAM_TOKEN>
       TELEGRAM_CHAT_ID: <TELEGRAM_CHAT_ID>
       SUBSCRIPTIONS_FILE: /subscriptions/subscriptions.json
-  # Optional: mount this volume to persist subscriptions outside container
-  # Command /save won't work without this volume
-  # The startup import also requires this volume and to match the path defined in SUBSCRIPTIONS_FILE
-  # volumes:
-  #   - ./subscriptions/:/subscriptions/
+    # Optional: mount this volume to persist subscriptions outside container
+    # Command /save won't work without this volume
+    # The startup import also requires this volume and to match the path defined in SUBSCRIPTIONS_FILE
+    volumes:
+      - ./subscriptions:/subscriptions
     restart: unless-stopped

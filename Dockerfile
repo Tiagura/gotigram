@@ -27,6 +27,5 @@ FROM gcr.io/distroless/base-debian13
 
 WORKDIR /app
 COPY --from=builder /app/gotigram /app/gotigram
-USER nonroot:nonroot
 
 ENTRYPOINT ["/app/gotigram"]

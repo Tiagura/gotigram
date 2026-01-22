@@ -133,6 +133,8 @@ export SUBSCRIPTIONS_FILE=<path/to/json>  # Optional to set
 ```bash
 git clone https://github.com/Tiagura/gotigram.git
 cd gotigram
+export MYUID=$(id -u)
+export MYGID=$(id -g)
 docker compose -f local-docker-compose.yml up -d
 ```
 
@@ -141,6 +143,10 @@ docker compose -f local-docker-compose.yml up -d
 [Example file](docker-compose.yml)
 
 ```bash
+git clone https://github.com/Tiagura/gotigram.git
+cd gotigram
+export MYUID=$(id -u)
+export MYGID=$(id -g)
 docker compose -f docker-compose.yml up -d
 ```
 

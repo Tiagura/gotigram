@@ -72,6 +72,14 @@ func loadSubscriptionsFromFile(path string) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		log.Printf("Failed to read subscriptions file %s: %v", path, err)
+		// If file doesn't exist it means no subscriptions yet, so just create an empty one
+		if os.IsNotExist(err) {
+			log.Printf("Creating empty subscriptions file at %s", path)
+			err = os.WriteFile(path, []byte("[]"), 0644)
+			if err != nil {
+				log.Printf("Failed to create empty subscriptions file at %s: %v", path, err)
+			}
+		}
 		return
 	}
 
