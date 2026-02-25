@@ -59,6 +59,7 @@ Set the following optional environment variable:
 | Variable             | Description                                             |
 | -------------------- | ------------------------------------------------------- |
 | `SUBSCRIPTIONS_FILE` | Path to a JSON file containing predefined subscriptions. If not set, Gotigram uses a default file (`/app/subscriptions.json` inside containers). |
+| `TELEGRAM_TEMPLATE`  | Custom Go `text/template` for Telegram messages. Available variables: `{{.Title}}` and `{{.Message}}`. Defaults to `*{{.Title}}*\n\n{{.Message}}` (bold title, blank line, then message body). Messages are sent with Markdown parse mode. |
 
 - If the file exists and contains valid subscriptions, they will be loaded automatically on startup.
 - If the file is missing or empty, Gotigram will start normally with no subscriptions.

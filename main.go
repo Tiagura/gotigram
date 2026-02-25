@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"text/template"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/gorilla/websocket"
@@ -46,11 +48,34 @@ var (
 
 	subscriptions = make(map[int]Subscription)
 	subMu         sync.RWMutex
+
+	telegramTemplate = func() *template.Template {
+		tmplStr := os.Getenv("TELEGRAM_TEMPLATE")
+		if tmplStr == "" {
+			tmplStr = "*{{.Title}}*\n\n{{.Message}}"
+		}
+		t, err := template.New("telegram").Parse(tmplStr)
+		if err != nil {
+			log.Fatalf("Failed to parse TELEGRAM_TEMPLATE: %v", err)
+		}
+		return t
+	}()
 )
 
 /* -------------------
    Helpers
 ------------------- */
+
+var mdEscaper = strings.NewReplacer(
+	"_", "\\_",
+	"*", "\\*",
+	"`", "\\`",
+	"[", "\\[",
+)
+
+func escapeMD(s string) string {
+	return mdEscaper.Replace(s)
+}
 
 func mustEnv(key string) string {
 	v := os.Getenv(key)
@@ -609,8 +634,19 @@ func listenGotify(bot *tgbotapi.BotAPI) {
 		if subscribed {
 			if msg.Priority >= sub.Priority {
 				log.Printf("Forwarding message from app %d (sub prio %d)", msg.AppID, sub.Priority)
-				text := fmt.Sprintf("%s - %s", msg.Title, msg.Message)
-				tg := tgbotapi.NewMessage(TELEGRAM_CHAT_ID, text)
+				escaped := GotifyMessage{
+					Title:    escapeMD(msg.Title),
+					Message:  escapeMD(msg.Message),
+					AppID:    msg.AppID,
+					Priority: msg.Priority,
+				}
+				var buf bytes.Buffer
+				if err := telegramTemplate.Execute(&buf, escaped); err != nil {
+					log.Printf("Failed to render template: %v", err)
+					continue
+				}
+				tg := tgbotapi.NewMessage(TELEGRAM_CHAT_ID, buf.String())
+				tg.ParseMode = "Markdown"
 				bot.Send(tg)
 			} else {
 				log.Printf("Message priority %d < subscription priority %d, ignoring", msg.Priority, sub.Priority)
