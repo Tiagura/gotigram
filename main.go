@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"text/template"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/gorilla/websocket"
@@ -46,11 +48,60 @@ var (
 
 	subscriptions = make(map[int]Subscription)
 	subMu         sync.RWMutex
+
+	telegramTemplate = func() *template.Template {
+		tmplStr := os.Getenv("TELEGRAM_TEMPLATE")
+		if tmplStr == "" {
+			tmplStr = "*{{.Title}}*\n\n{{.Message}}"
+		} else {
+			tmplStr = unescapeEnv(tmplStr)
+		}
+
+		log.Printf("Parsed Telegram template: %s", tmplStr)
+
+		t, err := template.New("telegram").Parse(tmplStr)
+		if err != nil {
+			log.Fatalf("Failed to parse TELEGRAM_TEMPLATE: %v", err)
+		}
+		return t
+	}()
 )
 
 /* -------------------
    Helpers
 ------------------- */
+
+var mdEscaper = strings.NewReplacer(
+	`\\`, `\\\\`,  // backslash
+	"`", "\\`",    // backtick
+	"*", "\\*",    // asterisk
+	"_", "\\_",    // underscore
+	"{", "\\{",    // curly brace open
+	"}", "\\}",    // curly brace close
+	"[", "\\[",    // square bracket open
+	"]", "\\]",    // square bracket close
+	"(", "\\(",    // parenthesis open
+	")", "\\)",    // parenthesis close
+	"#", "\\#",    // hash
+	"+", "\\+",    // plus
+	"-", "\\-",    // minus/hyphen
+	".", "\\.",    // dot
+	"!", "\\!",    // exclamation
+)
+
+func escapeMD(s string) string {
+	return mdEscaper.Replace(s)
+}
+
+// Unescape \n, \t, etc.
+func unescapeEnv(s string) string {
+	replacer := strings.NewReplacer(
+		`\\`, `\`,  // literal backslash
+		`\n`, "\n", // newline
+		`\t`, "\t", // tab
+	)
+	return replacer.Replace(s)
+}
 
 func mustEnv(key string) string {
 	v := os.Getenv(key)
@@ -609,8 +660,19 @@ func listenGotify(bot *tgbotapi.BotAPI) {
 		if subscribed {
 			if msg.Priority >= sub.Priority {
 				log.Printf("Forwarding message from app %d (sub prio %d)", msg.AppID, sub.Priority)
-				text := fmt.Sprintf("%s - %s", msg.Title, msg.Message)
-				tg := tgbotapi.NewMessage(TELEGRAM_CHAT_ID, text)
+				escaped := GotifyMessage{
+					Title:    escapeMD(msg.Title),
+					Message:  escapeMD(msg.Message),
+					AppID:    msg.AppID,
+					Priority: msg.Priority,
+				}
+				var buf bytes.Buffer
+				if err := telegramTemplate.Execute(&buf, escaped); err != nil {
+					log.Printf("Failed to render template: %v", err)
+					continue
+				}
+				tg := tgbotapi.NewMessage(TELEGRAM_CHAT_ID, buf.String())
+				tg.ParseMode = "Markdown"
 				bot.Send(tg)
 			} else {
 				log.Printf("Message priority %d < subscription priority %d, ignoring", msg.Priority, sub.Priority)
