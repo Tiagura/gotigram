@@ -53,7 +53,12 @@ var (
 		tmplStr := os.Getenv("TELEGRAM_TEMPLATE")
 		if tmplStr == "" {
 			tmplStr = "*{{.Title}}*\n\n{{.Message}}"
+		} else {
+			tmplStr = unescapeEnv(tmplStr)
 		}
+
+		log.Printf("Parsed Telegram template: %s", tmplStr)
+
 		t, err := template.New("telegram").Parse(tmplStr)
 		if err != nil {
 			log.Fatalf("Failed to parse TELEGRAM_TEMPLATE: %v", err)
@@ -67,14 +72,35 @@ var (
 ------------------- */
 
 var mdEscaper = strings.NewReplacer(
-	"_", "\\_",
-	"*", "\\*",
-	"`", "\\`",
-	"[", "\\[",
+	`\\`, `\\\\`,  // backslash
+	"`", "\\`",    // backtick
+	"*", "\\*",    // asterisk
+	"_", "\\_",    // underscore
+	"{", "\\{",    // curly brace open
+	"}", "\\}",    // curly brace close
+	"[", "\\[",    // square bracket open
+	"]", "\\]",    // square bracket close
+	"(", "\\(",    // parenthesis open
+	")", "\\)",    // parenthesis close
+	"#", "\\#",    // hash
+	"+", "\\+",    // plus
+	"-", "\\-",    // minus/hyphen
+	".", "\\.",    // dot
+	"!", "\\!",    // exclamation
 )
 
 func escapeMD(s string) string {
 	return mdEscaper.Replace(s)
+}
+
+// Unescape \n, \t, etc.
+func unescapeEnv(s string) string {
+	replacer := strings.NewReplacer(
+		`\\`, `\`,  // literal backslash
+		`\n`, "\n", // newline
+		`\t`, "\t", // tab
+	)
+	return replacer.Replace(s)
 }
 
 func mustEnv(key string) string {
