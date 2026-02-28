@@ -676,22 +676,34 @@ func listenGotify(bot *tgbotapi.BotAPI) {
 				continue
 			}
 
-		if subscribed {
-			if msg.Priority >= sub.Priority {
-				log.Printf("Forwarding message from app %d (sub prio %d)", msg.AppID, sub.Priority)
-				tmplData := msg
-				if ESCAPE_MARKDOWN {
-					tmplData = GotifyMessage{
-						Title:    escapeMD(msg.Title),
-						Message:  escapeMD(msg.Message),
-						AppID:    msg.AppID,
-						Priority: msg.Priority,
+			log.Printf("Message from app %d (priority %d)", msg.AppID, msg.Priority)
+
+			subMu.RLock()
+			sub, subscribed := subscriptions[msg.AppID]
+			subMu.RUnlock()
+
+			if subscribed {
+				if msg.Priority >= sub.Priority {
+					log.Printf("Forwarding message: message priority %d >= subscription priority %d", msg.Priority, sub.Priority)
+					tmplData := msg
+					if ESCAPE_MARKDOWN {
+						tmplData = GotifyMessage{
+							Title:    escapeMD(msg.Title),
+							Message:  escapeMD(msg.Message),
+							AppID:    msg.AppID,
+							Priority: msg.Priority,
+						}
 					}
-				}
-				var buf bytes.Buffer
-				if err := telegramTemplate.Execute(&buf, tmplData); err != nil {
-					log.Printf("Failed to render template: %v", err)
-					continue
+					var buf bytes.Buffer
+					if err := telegramTemplate.Execute(&buf, tmplData); err != nil {
+						log.Printf("Failed to render template: %v", err)
+						continue
+					}
+					tg := tgbotapi.NewMessage(TELEGRAM_CHAT_ID, buf.String())
+					tg.ParseMode = "Markdown"
+					bot.Send(tg)
+				} else {
+					log.Printf("Message priority %d < subscription priority %d, ignoring", msg.Priority, sub.Priority)
 				}
 			} else {
 				log.Printf("Message from unsubscribed app %d, ignoring", msg.AppID)
