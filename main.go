@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"text/template"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 	"github.com/gorilla/websocket"
@@ -644,58 +645,69 @@ func fetchApps() ([]GotifyApp, error) {
 func listenGotify(bot *tgbotapi.BotAPI) {
 	url := fmt.Sprintf("%s/stream?token=%s", GOTIFY_WS_URL, GOTIFY_CLIENT_TOKEN)
 
-	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
-	if err != nil {
-		log.Fatalf("Failed to connect to Gotify WS: %v", err)
-	}
-	defer conn.Close()
-
-	log.Println("Connected to Gotify stream")
+	backoff := time.Second
+	const maxBackoff = 60 * time.Second
 
 	for {
-		_, data, err := conn.ReadMessage()
+		log.Printf("Connecting to Gotify stream...")
+		conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 		if err != nil {
-			log.Printf("WebSocket error: %v", err)
-			return
-		}
-
-		var msg GotifyMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			log.Printf("Error parsing message: %v", err)
+			log.Printf("Failed to connect to Gotify WS: %v, retrying in %v", err, backoff)
+			time.Sleep(backoff)
+			backoff = min(backoff*2, maxBackoff)
 			continue
 		}
+		log.Println("Connected to Gotify stream")
 
-		log.Printf("Gotify message from app %d: %s - %s (priority %d)", msg.AppID, msg.Title, msg.Message, msg.Priority)
-
-		subMu.RLock()
-		sub, subscribed := subscriptions[msg.AppID]
-		subMu.RUnlock()
-
-		if subscribed {
-			if msg.Priority >= sub.Priority {
-				log.Printf("Forwarding message from app %d (sub prio %d)", msg.AppID, sub.Priority)
-				tmplData := msg
-				if ESCAPE_MARKDOWN {
-					tmplData = GotifyMessage{
-						Title:    escapeMD(msg.Title),
-						Message:  escapeMD(msg.Message),
-						AppID:    msg.AppID,
-						Priority: msg.Priority,
-					}
-				}
-				var buf bytes.Buffer
-				if err := telegramTemplate.Execute(&buf, tmplData); err != nil {
-					log.Printf("Failed to render template: %v", err)
-					continue
-				}
-				tg := tgbotapi.NewMessage(TELEGRAM_CHAT_ID, buf.String())
-				tg.ParseMode = "Markdown"
-				bot.Send(tg)
-			} else {
-				log.Printf("Message priority %d < subscription priority %d, ignoring", msg.Priority, sub.Priority)
+		for {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				log.Printf("WebSocket error: %v, reconnecting in %v...", err, backoff)
+				conn.Close()
+				time.Sleep(backoff)
+				backoff = min(backoff*2, maxBackoff)
+				break
 			}
-		} else {
-			log.Printf("Message from unsubscribed app %d, ignoring", msg.AppID)
+			backoff = time.Second
+
+			var msg GotifyMessage
+			if err := json.Unmarshal(data, &msg); err != nil {
+				log.Printf("Error parsing message: %v", err)
+				continue
+			}
+
+			log.Printf("Message from app %d (priority %d)", msg.AppID, msg.Priority)
+
+			subMu.RLock()
+			sub, subscribed := subscriptions[msg.AppID]
+			subMu.RUnlock()
+
+			if subscribed {
+				if msg.Priority >= sub.Priority {
+					log.Printf("Forwarding message: message priority %d >= subscription priority %d", msg.Priority, sub.Priority)
+					tmplData := msg
+					if ESCAPE_MARKDOWN {
+						tmplData = GotifyMessage{
+							Title:    escapeMD(msg.Title),
+							Message:  escapeMD(msg.Message),
+							AppID:    msg.AppID,
+							Priority: msg.Priority,
+						}
+					}
+					var buf bytes.Buffer
+					if err := telegramTemplate.Execute(&buf, tmplData); err != nil {
+						log.Printf("Failed to render template: %v", err)
+						continue
+					}
+					tg := tgbotapi.NewMessage(TELEGRAM_CHAT_ID, buf.String())
+					tg.ParseMode = "Markdown"
+					bot.Send(tg)
+				} else {
+					log.Printf("Message priority %d < subscription priority %d, ignoring", msg.Priority, sub.Priority)
+				}
+			} else {
+				log.Printf("Message from unsubscribed app %d, ignoring", msg.AppID)
+			}
 		}
 	}
 }

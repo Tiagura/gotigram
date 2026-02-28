@@ -9,6 +9,9 @@
 *.dylib
 *.test
 
+# Compiled object files
+gotigram
+
 # Output of the Go build tool
 /bin/
 /build/
