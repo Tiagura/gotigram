@@ -57,7 +57,8 @@ To connect Gotigram to these services, you must provide certain configuration va
 | Variable              | Description                                                                            |
 |-----------------------|----------------------------------------------------------------------------------------|
 | `SUBSCRIPTIONS_FILE`  | Path to a JSON file containing predefined subscriptions. Defaults to `subscriptions.json`. See [how to use](#optional-subscriptions-configuration-file). |
-| `TELEGRAM_TEMPLATE` | Custom Go `text/template` for Telegram messages. Available variables: `{{.Title}}` and `{{.Message}}`. Defaults to `*{{.Title}}*\n\n{{.Message}}` (bold title, blank line, then message body). Messages are sent with Markdown parse mode. **Wrap in `'...'` or `"..."`.** | |
+| `TELEGRAM_TEMPLATE` | Custom Go `text/template` for Telegram messages. Available variables: `{{.Title}}` and `{{.Message}}`. Defaults to `{{.Title}}\n\n{{.Message}}`. Messages are sent with Markdown parse mode. **Wrap in `'...'` or `"..."`.** |
+| `ESCAPE_MARKDOWN` | Set to `true` to escape Markdown special characters in message title and body before template rendering. Defaults to `false`. Enable this if your Gotify sources send plain text that may contain characters like `_`, `*`, or `` ` `` which would break Markdown parsing. |
 
 
 ## Subscriptions Configuration File
@@ -129,6 +130,7 @@ export TELEGRAM_TOKEN=<YOUR_TELEGRAM_BOT_TOKEN>
 export TELEGRAM_CHAT_ID=<YOUR_TELEGRAM_CHAT_ID>
 export SUBSCRIPTIONS_FILE=<path/to/json>  # Optional to set
 export TELEGRAM_TEMPLATE=''               # Optional to set
+export ESCAPE_MARKDOWN=false              # Optional to set
 
 ./gotigram
 ```
