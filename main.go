@@ -45,6 +45,7 @@ var (
 	TELEGRAM_TOKEN      = mustEnv("TELEGRAM_TOKEN")
 	TELEGRAM_CHAT_ID    = mustInt64(mustEnv("TELEGRAM_CHAT_ID"))
 	SUBSCRIPTIONS_FILE  = getSubscriptionsFile()
+	ESCAPE_MARKDOWN     = parseBoolEnv("ESCAPE_MARKDOWN")
 
 	subscriptions = make(map[int]Subscription)
 	subMu         sync.RWMutex
@@ -52,7 +53,7 @@ var (
 	telegramTemplate = func() *template.Template {
 		tmplStr := os.Getenv("TELEGRAM_TEMPLATE")
 		if tmplStr == "" {
-			tmplStr = "*{{.Title}}*\n\n{{.Message}}"
+			tmplStr = "{{.Title}}\n\n{{.Message}}"
 		} else {
 			tmplStr = unescapeEnv(tmplStr)
 		}
@@ -101,6 +102,19 @@ func unescapeEnv(s string) string {
 		`\t`, "\t", // tab
 	)
 	return replacer.Replace(s)
+}
+
+func parseBoolEnv(key string) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return false
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		log.Printf("Invalid boolean value for %s: %q, defaulting to false", key, v)
+		return false
+	}
+	return b
 }
 
 func mustEnv(key string) string {
@@ -660,14 +674,17 @@ func listenGotify(bot *tgbotapi.BotAPI) {
 		if subscribed {
 			if msg.Priority >= sub.Priority {
 				log.Printf("Forwarding message from app %d (sub prio %d)", msg.AppID, sub.Priority)
-				escaped := GotifyMessage{
-					Title:    escapeMD(msg.Title),
-					Message:  escapeMD(msg.Message),
-					AppID:    msg.AppID,
-					Priority: msg.Priority,
+				tmplData := msg
+				if ESCAPE_MARKDOWN {
+					tmplData = GotifyMessage{
+						Title:    escapeMD(msg.Title),
+						Message:  escapeMD(msg.Message),
+						AppID:    msg.AppID,
+						Priority: msg.Priority,
+					}
 				}
 				var buf bytes.Buffer
-				if err := telegramTemplate.Execute(&buf, escaped); err != nil {
+				if err := telegramTemplate.Execute(&buf, tmplData); err != nil {
 					log.Printf("Failed to render template: %v", err)
 					continue
 				}
