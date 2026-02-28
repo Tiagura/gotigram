@@ -284,9 +284,16 @@ func sendWithRetry(bot *tgbotapi.BotAPI, msg tgbotapi.Chattable, maxRetries int)
 			return
 		}
 		log.Printf("Telegram send failed (attempt %d/%d): %v", i+1, maxRetries, err)
-		// Don't retry client errors (4xx) — they will never succeed
+		// Don't retry client errors (4xx) — they will never succeed,
+		// except 429 (rate limited) which is retryable.
 		var apiErr *tgbotapi.Error
 		if errors.As(err, &apiErr) && apiErr.Code >= 400 && apiErr.Code < 500 {
+			if apiErr.Code == 429 && apiErr.RetryAfter > 0 {
+				backoff = time.Duration(apiErr.RetryAfter) * time.Second
+				log.Printf("Rate limited, retrying after %ds", apiErr.RetryAfter)
+				time.Sleep(backoff)
+				continue
+			}
 			return
 		}
 		if i < maxRetries-1 {
