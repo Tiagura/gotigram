@@ -16,6 +16,7 @@ services:
       TELEGRAM_TOKEN: <TELEGRAM_TOKEN>
       # Optional
       TELEGRAM_TEMPLATE: ""
+      ESCAPE_MARKDOWN: "false"
       SUBSCRIPTIONS_FILE: /subscriptions/subscriptions.json
     # Optional: mount this volume to persist subscriptions outside container
     # Command /save won't work without this volume
