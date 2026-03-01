@@ -47,6 +47,7 @@ var (
 	TELEGRAM_TOKEN      = mustEnv("TELEGRAM_TOKEN")
 	TELEGRAM_CHAT_ID    = mustInt64(mustEnv("TELEGRAM_CHAT_ID"))
 	SUBSCRIPTIONS_FILE  = getSubscriptionsFile()
+	ESCAPE_MARKDOWN     = parseBoolEnv("ESCAPE_MARKDOWN")
 
 	subscriptions = make(map[int]Subscription)
 	subMu         sync.RWMutex
@@ -54,7 +55,7 @@ var (
 	telegramTemplate = func() *template.Template {
 		tmplStr := os.Getenv("TELEGRAM_TEMPLATE")
 		if tmplStr == "" {
-			tmplStr = "*{{.Title}}*\n\n{{.Message}}"
+			tmplStr = "{{.Title}}\n\n{{.Message}}"
 		} else {
 			tmplStr = unescapeEnv(tmplStr)
 		}
@@ -103,6 +104,19 @@ func unescapeEnv(s string) string {
 		`\t`, "\t", // tab
 	)
 	return replacer.Replace(s)
+}
+
+func parseBoolEnv(key string) bool {
+	v := os.Getenv(key)
+	if v == "" {
+		return false
+	}
+	b, err := strconv.ParseBool(v)
+	if err != nil {
+		log.Printf("Invalid boolean value for %s: %q, defaulting to false", key, v)
+		return false
+	}
+	return b
 }
 
 func mustEnv(key string) string {
@@ -677,59 +691,73 @@ func listenGotify(bot *tgbotapi.BotAPI) {
 		}
 	}()
 
-	conn, _, err := websocket.DefaultDialer.Dial(url, nil)
-	if err != nil {
-		log.Fatalf("Failed to connect to Gotify WS: %v", err)
-	}
-	defer conn.Close()
-
-	log.Println("Connected to Gotify stream")
+	backoff := time.Second
+	const maxBackoff = 60 * time.Second
 
 	for {
-		_, data, err := conn.ReadMessage()
+		log.Printf("Connecting to Gotify stream...")
+		conn, _, err := websocket.DefaultDialer.Dial(url, nil)
 		if err != nil {
-			log.Printf("WebSocket error: %v", err)
-			return
-		}
-
-		var msg GotifyMessage
-		if err := json.Unmarshal(data, &msg); err != nil {
-			log.Printf("Error parsing message: %v", err)
+			log.Printf("Failed to connect to Gotify WS: %v, retrying in %v", err, backoff)
+			time.Sleep(backoff)
+			backoff = min(backoff*2, maxBackoff)
 			continue
 		}
+		log.Println("Connected to Gotify stream")
 
-		log.Printf("Gotify message from app %d: %s - %s (priority %d)", msg.AppID, msg.Title, msg.Message, msg.Priority)
+		for {
+			_, data, err := conn.ReadMessage()
+			if err != nil {
+				log.Printf("WebSocket error: %v, reconnecting in %v...", err, backoff)
+				conn.Close()
+				time.Sleep(backoff)
+				backoff = min(backoff*2, maxBackoff)
+				break
+			}
+			backoff = time.Second
 
-		subMu.RLock()
-		sub, subscribed := subscriptions[msg.AppID]
-		subMu.RUnlock()
+			var msg GotifyMessage
+			if err := json.Unmarshal(data, &msg); err != nil {
+				log.Printf("Error parsing message: %v", err)
+				continue
+			}
 
-		if subscribed {
-			if msg.Priority >= sub.Priority {
-				log.Printf("Forwarding message from app %d (sub prio %d)", msg.AppID, sub.Priority)
-				escaped := GotifyMessage{
-					Title:    escapeMD(msg.Title),
-					Message:  escapeMD(msg.Message),
-					AppID:    msg.AppID,
-					Priority: msg.Priority,
-				}
-				var buf bytes.Buffer
-				if err := telegramTemplate.Execute(&buf, escaped); err != nil {
-					log.Printf("Failed to render template: %v", err)
-					continue
-				}
-				tg := tgbotapi.NewMessage(TELEGRAM_CHAT_ID, buf.String())
-				tg.ParseMode = "Markdown"
-				select {
-				case sendQueue <- tg:
-				default:
-					log.Printf("Telegram send queue full, dropping message from app %d", msg.AppID)
+			log.Printf("Message from app %d (priority %d)", msg.AppID, msg.Priority)
+
+			subMu.RLock()
+			sub, subscribed := subscriptions[msg.AppID]
+			subMu.RUnlock()
+
+			if subscribed {
+				if msg.Priority >= sub.Priority {
+					log.Printf("Forwarding message: message priority %d >= subscription priority %d", msg.Priority, sub.Priority)
+					tmplData := msg
+					if ESCAPE_MARKDOWN {
+						tmplData = GotifyMessage{
+							Title:    escapeMD(msg.Title),
+							Message:  escapeMD(msg.Message),
+							AppID:    msg.AppID,
+							Priority: msg.Priority,
+						}
+					}
+					var buf bytes.Buffer
+					if err := telegramTemplate.Execute(&buf, tmplData); err != nil {
+						log.Printf("Failed to render template: %v", err)
+						continue
+					}
+					tg := tgbotapi.NewMessage(TELEGRAM_CHAT_ID, buf.String())
+					tg.ParseMode = "Markdown"
+					select {
+					case sendQueue <- tg:
+					default:
+						log.Printf("Telegram send queue full, dropping message from app %d", msg.AppID)
+					}
+				} else {
+					log.Printf("Message priority %d < subscription priority %d, ignoring", msg.Priority, sub.Priority)
 				}
 			} else {
-				log.Printf("Message priority %d < subscription priority %d, ignoring", msg.Priority, sub.Priority)
+				log.Printf("Message from unsubscribed app %d, ignoring", msg.AppID)
 			}
-		} else {
-			log.Printf("Message from unsubscribed app %d, ignoring", msg.AppID)
 		}
 	}
 }
