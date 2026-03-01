@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -281,7 +282,40 @@ func startTelegram(bot *tgbotapi.BotAPI) {
 
 func reply(bot *tgbotapi.BotAPI, update tgbotapi.Update, text string) {
 	msg := tgbotapi.NewMessage(update.Message.Chat.ID, text)
-	bot.Send(msg)
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Failed to send reply: %v", err)
+	}
+}
+
+func sendWithRetry(bot *tgbotapi.BotAPI, msg tgbotapi.Chattable, maxRetries int) {
+	if maxRetries <= 0 {
+		maxRetries = 1
+	}
+	backoff := time.Second
+	var err error
+	for i := 0; i < maxRetries; i++ {
+		if _, err = bot.Send(msg); err == nil {
+			return
+		}
+		log.Printf("Telegram send failed (attempt %d/%d): %v", i+1, maxRetries, err)
+		// Don't retry client errors (4xx) — they will never succeed,
+		// except 429 (rate limited) which is retryable.
+		var apiErr *tgbotapi.Error
+		if errors.As(err, &apiErr) && apiErr.Code >= 400 && apiErr.Code < 500 {
+			if apiErr.Code == 429 && apiErr.RetryAfter > 0 {
+				backoff = time.Duration(apiErr.RetryAfter) * time.Second
+				log.Printf("Rate limited, retrying after %ds", apiErr.RetryAfter)
+				time.Sleep(backoff)
+				continue
+			}
+			return
+		}
+		if i < maxRetries-1 {
+			time.Sleep(backoff)
+			backoff *= 2
+		}
+	}
+	log.Printf("Telegram send failed after %d attempts: %v", maxRetries, err)
 }
 
 /* -------------------
@@ -576,7 +610,9 @@ func handleExport(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	)
 	msg.ParseMode = "Markdown"
 
-	bot.Send(msg)
+	if _, err := bot.Send(msg); err != nil {
+		log.Printf("Failed to send export message: %v", err)
+	}
 }
 
 func handleSave(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
@@ -645,6 +681,16 @@ func fetchApps() ([]GotifyApp, error) {
 func listenGotify(bot *tgbotapi.BotAPI) {
 	url := fmt.Sprintf("%s/stream?token=%s", GOTIFY_WS_URL, GOTIFY_CLIENT_TOKEN)
 
+	// Buffered send queue: decouples WS reading from Telegram sending,
+	// caps memory usage, and preserves message order.
+	sendQueue := make(chan tgbotapi.Chattable, 100)
+	defer close(sendQueue)
+	go func() {
+		for msg := range sendQueue {
+			sendWithRetry(bot, msg, 3)
+		}
+	}()
+
 	backoff := time.Second
 	const maxBackoff = 60 * time.Second
 
@@ -701,7 +747,11 @@ func listenGotify(bot *tgbotapi.BotAPI) {
 					}
 					tg := tgbotapi.NewMessage(TELEGRAM_CHAT_ID, buf.String())
 					tg.ParseMode = "Markdown"
-					bot.Send(tg)
+					select {
+					case sendQueue <- tg:
+					default:
+						log.Printf("Telegram send queue full, dropping message from app %d", msg.AppID)
+					}
 				} else {
 					log.Printf("Message priority %d < subscription priority %d, ignoring", msg.Priority, sub.Priority)
 				}
