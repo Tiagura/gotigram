@@ -48,6 +48,8 @@ var (
 	TELEGRAM_CHAT_ID    = mustInt64(mustEnv("TELEGRAM_CHAT_ID"))
 	SUBSCRIPTIONS_FILE  = getSubscriptionsFile()
 	ESCAPE_MARKDOWN     = parseBoolEnv("ESCAPE_MARKDOWN")
+	DEFAULT_MESSAGE_QUEUE_SIZE = 100
+	MAX_RETRIES = 3
 
 	subscriptions = make(map[int]Subscription)
 	subMu         sync.RWMutex
@@ -67,6 +69,38 @@ var (
 			log.Fatalf("Failed to parse TELEGRAM_TEMPLATE: %v", err)
 		}
 		return t
+	}()
+
+	messageQueueSize = func() int {
+
+		sizeStr := os.Getenv("MESSAGE_QUEUE_SIZE")
+		if sizeStr == "" {
+			return DEFAULT_MESSAGE_QUEUE_SIZE
+		}
+
+		size, err := strconv.Atoi(sizeStr)
+		if err != nil || size <= 0 {
+			log.Printf("Invalid MESSAGE_QUEUE_SIZE value: %q, must be > 0. Defaulting to %d", sizeStr, DEFAULT_MESSAGE_QUEUE_SIZE)
+			return DEFAULT_MESSAGE_QUEUE_SIZE
+		}
+
+		return size
+	}()
+
+	maxRetries = func() int {
+
+		retriesStr := os.Getenv("MAX_RETRIES")
+		if retriesStr == "" {
+			return MAX_RETRIES
+		}
+
+		retries, err := strconv.Atoi(retriesStr)
+		if err != nil || retries <= 0 {
+			log.Printf("Invalid MAX_RETRIES value: %q, must be > 0. Defaulting to %d", retriesStr, MAX_RETRIES)
+			return MAX_RETRIES
+		}
+
+		return retries
 	}()
 )
 
@@ -683,11 +717,11 @@ func listenGotify(bot *tgbotapi.BotAPI) {
 
 	// Buffered send queue: decouples WS reading from Telegram sending,
 	// caps memory usage, and preserves message order.
-	sendQueue := make(chan tgbotapi.Chattable, 100)
+	sendQueue := make(chan tgbotapi.Chattable, messageQueueSize)
 	defer close(sendQueue)
 	go func() {
 		for msg := range sendQueue {
-			sendWithRetry(bot, msg, 3)
+			sendWithRetry(bot, msg, maxRetries)
 		}
 	}()
 
@@ -748,9 +782,9 @@ func listenGotify(bot *tgbotapi.BotAPI) {
 					tg := tgbotapi.NewMessage(TELEGRAM_CHAT_ID, buf.String())
 					tg.ParseMode = "Markdown"
 					select {
-					case sendQueue <- tg:
-					default:
-						log.Printf("Telegram send queue full, dropping message from app %d", msg.AppID)
+						case sendQueue <- tg:	
+						default:
+							log.Printf("Telegram send queue full, dropping message from app %d", msg.AppID)
 					}
 				} else {
 					log.Printf("Message priority %d < subscription priority %d, ignoring", msg.Priority, sub.Priority)
