@@ -18,6 +18,8 @@ services:
       TELEGRAM_TEMPLATE: ""
       ESCAPE_MARKDOWN: "false"
       SUBSCRIPTIONS_FILE: /subscriptions/subscriptions.json
+      MESSAGE_QUEUE_SIZE: 100
+      MAX_RETRIES: 3
     # Optional: mount this volume to persist subscriptions outside container
     # Command /save won't work without this volume
     # The startup import also requires this volume and to match the path defined in SUBSCRIPTIONS_FILE
