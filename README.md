@@ -56,11 +56,11 @@ To connect Gotigram to these services, you must provide certain configuration va
 
 | Variable              | Description                                                                            |
 |-----------------------|----------------------------------------------------------------------------------------|
-| `SUBSCRIPTIONS_FILE`  | Path to a JSON file containing predefined subscriptions. Defaults to `subscriptions.json`. See [how to use](#subscriptions-configuration-file). |
-| `TELEGRAM_TEMPLATE`   | Custom Go `text/template` for Telegram messages. Available variables: `{{.Title}}` and `{{.Message}}`. Defaults to `{{.Title}}\n\n{{.Message}}`. Messages are sent with Markdown parse mode. **Wrap in `'...'` or `"..."`.** |
-| `ESCAPE_MARKDOWN`     | Set to `true` to escape Markdown special characters in message title and body before template rendering. Defaults to `false`. Enable this if your Gotify sources send plain text that may contain characters like `_`, `*`, or `` ` `` which would break Markdown parsing. |
 | `MESSAGE_QUEUE_SIZE`  | Number of messages to be stored in the message queue. Defaults to `100`. Must be greater than `0`. |
 | `MAX_RETRIES`         | Maximum number of retry attempts when sending a message to Telegram fails. Defaults to `3`. Must be greater than `0`. |
+| `PARSE_MODE`          | Controls how Telegram renders message formatting via the Bot API `parse_mode`. Supported values: `Markdown`, `MarkdownV2`, and `HTML`. Defaults to `Markdown` if not set. |
+| `TELEGRAM_TEMPLATE`   | Custom Go `text/template` for Telegram messages. Available variables: `{{.Title}}` and `{{.Message}}`. Defaults to `{{.Title}}\n\n{{.Message}}`. |
+| `SUBSCRIPTIONS_FILE`  | Path to a JSON file containing predefined subscriptions. Defaults to `subscriptions.json`. See [how to use](#subscriptions-configuration-file). |
 
 ## Subscriptions Configuration File
 
@@ -83,6 +83,7 @@ The file must contain a JSON array of subscription objects, which have the follo
 | `ID`       | Yes      | Gotify application ID                                                                           |
 | `Name`     | No       | Human-readable application name (used in Telegram messages; defaults to `""` if omitted)        |
 | `Priority` | No       | Minimum priority (0–10) for notifications. Defaults to `0`                                      |
+| `Format`   | No       | Message parse mode (`Markdown`, `MarkdownV2`, `HTML`). Defaults to `Markdown`                   |
 
 
 Example `subscriptions.json`
@@ -170,7 +171,7 @@ Once the bot is running, open a Telegram chat with it and send the `/start` comm
 
 - `/help` - Show help message  
 - `/apps` - List all applications on the Gotify server, with subscription status.
-- `/subscribe <app_id|all>[,<priority>]` - Subscribe to a specific application by its ID, or to all applications using all. Optionally set a priority (0–10); defaults to 0.
+- `/subscribe <app_id|all> [-p <priority>] [-f <Markdown|MarkdownV2|HTML>]` - Subscribe to a specific application by its ID, or to all applications using all. Optionally set a priority (0-10, defaults to 0) and/or a parse format (Markdown|MarkdownV2|HTML, defaults to Markdown).
 - `/subscriptions` - Show a list of your current subscriptions, including priority.
 - `/unsubscribe <app_id|app_id1,app_id2,...|all>` - Unsubscribe from one or more applications (comma-separated IDs) or from all subscriptions using all.
 - `/export` - Export the current subscriptions as a JSON array directly in the Telegram chat.
