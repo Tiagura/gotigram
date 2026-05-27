@@ -56,10 +56,11 @@ To connect Gotigram to these services, you must provide certain configuration va
 
 | Variable              | Description                                                                            |
 |-----------------------|----------------------------------------------------------------------------------------|
-| `SUBSCRIPTIONS_FILE`  | Path to a JSON file containing predefined subscriptions. Defaults to `subscriptions.json`. See [how to use](#optional-subscriptions-configuration-file). |
-| `TELEGRAM_TEMPLATE` | Custom Go `text/template` for Telegram messages. Available variables: `{{.Title}}` and `{{.Message}}`. Defaults to `{{.Title}}\n\n{{.Message}}`. Messages are sent with Markdown parse mode. **Wrap in `'...'` or `"..."`.** |
-| `ESCAPE_MARKDOWN` | Set to `true` to escape Markdown special characters in message title and body before template rendering. Defaults to `false`. Enable this if your Gotify sources send plain text that may contain characters like `_`, `*`, or `` ` `` which would break Markdown parsing. |
-
+| `SUBSCRIPTIONS_FILE`  | Path to a JSON file containing predefined subscriptions. Defaults to `subscriptions.json`. See [how to use](#subscriptions-configuration-file). |
+| `TELEGRAM_TEMPLATE`   | Custom Go `text/template` for Telegram messages. Available variables: `{{.Title}}` and `{{.Message}}`. Defaults to `{{.Title}}\n\n{{.Message}}`. Messages are sent with Markdown parse mode. **Wrap in `'...'` or `"..."`.** |
+| `ESCAPE_MARKDOWN`     | Set to `true` to escape Markdown special characters in message title and body before template rendering. Defaults to `false`. Enable this if your Gotify sources send plain text that may contain characters like `_`, `*`, or `` ` `` which would break Markdown parsing. |
+| `MESSAGE_QUEUE_SIZE`  | Number of messages to be stored in the message queue. Defaults to `100`. Must be greater than `0`. |
+| `MAX_RETRIES`         | Maximum number of retry attempts when sending a message to Telegram fails. Defaults to `3`. Must be greater than `0`. |
 
 ## Subscriptions Configuration File
 
@@ -128,9 +129,7 @@ export GOTIFY_REST_URL=http(s)://<GOTIFY_SERVER>:<REST_PORT>
 export GOTIFY_CLIENT_TOKEN=<YOUR_GOTIFY_CLIENT_TOKEN>
 export TELEGRAM_TOKEN=<YOUR_TELEGRAM_BOT_TOKEN>
 export TELEGRAM_CHAT_ID=<YOUR_TELEGRAM_CHAT_ID>
-export SUBSCRIPTIONS_FILE=<path/to/json>  # Optional to set
-export TELEGRAM_TEMPLATE=''               # Optional to set
-export ESCAPE_MARKDOWN=false              # Optional to set
+# Set optional variables if needed the same way
 
 ./gotigram
 ```
