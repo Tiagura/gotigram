@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,10 +11,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"sort"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"text/template"
 	"time"
 
@@ -21,9 +24,15 @@ import (
 	"github.com/gorilla/websocket"
 )
 
-/* -------------------
-   Structs & Vars
-------------------- */
+/*
+	-------------------
+	  Structs & Vars
+
+-------------------
+*/
+
+const maxTelegramMessageLength = 4096 // Telegram's API maximum message length
+
 const (
 	ParseModePlain      ParseMode = ""
 	ParseModeMarkdown   ParseMode = "Markdown"
@@ -262,25 +271,32 @@ func getSubscriptionsFile() string {
 ------------------- */
 
 func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	bot, err := tgbotapi.NewBotAPI(TELEGRAM_TOKEN)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	log.Printf("Authorized as %s", bot.Self.UserName)
-
 	log.Printf("Subscriptions file: %s", SUBSCRIPTIONS_FILE)
 
-	// Load subscriptions from file if specified
 	if SUBSCRIPTIONS_FILE != "" {
 		loadSubscriptionsFromFile(SUBSCRIPTIONS_FILE)
 	}
 
-	// Start WebSocket listener concurrently
-	go listenGotify(bot)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		listenGotify(ctx, bot)
+	}()
 
-	// Start Telegram bot
-	startTelegram(bot)
+	startTelegram(ctx, bot)
+	stop()
+	wg.Wait()
+	log.Println("Shutdown complete")
 }
 
 /* -------------------
@@ -300,41 +316,50 @@ func isAuthorized(update tgbotapi.Update) bool {
 	return update.Message != nil && update.Message.Chat.ID == TELEGRAM_CHAT_ID
 }
 
-func startTelegram(bot *tgbotapi.BotAPI) {
+func startTelegram(ctx context.Context, bot *tgbotapi.BotAPI) {
 	u := tgbotapi.NewUpdate(0)
 	u.Timeout = 60
 	updates := bot.GetUpdatesChan(u)
+	defer bot.StopReceivingUpdates()
 
-	for update := range updates {
-		if update.Message == nil || !update.Message.IsCommand() {
-			continue
-		}
-		if !isAuthorized(update) {
-			log.Printf("Ignoring command from unauthorized chat %d", update.Message.Chat.ID)
-			continue
-		}
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case update, ok := <-updates:
+			if !ok {
+				return
+			}
+			if update.Message == nil || !update.Message.IsCommand() {
+				continue
+			}
+			if !isAuthorized(update) {
+				log.Printf("Ignoring command from unauthorized chat %d", update.Message.Chat.ID)
+				continue
+			}
 
-		switch update.Message.Command() {
-		case "start":
-			reply(bot, update, "Hi! I'm Gotigram.\nUse /help to see commands.")
-		case "help":
-			reply(bot, update, helpText)
-		case "subscribe":
-			handleSubscribe(bot, update)
-		case "unsubscribe":
-			handleUnsubscribe(bot, update)
-		case "subscriptions":
-			handleSubscriptions(bot, update)
-		case "apps":
-			handleApps(bot, update)
-		case "import":
-			handleImport(bot, update)
-		case "export":
-			handleExport(bot, update)
-		case "save":
-			handleSave(bot, update)
-		default:
-			reply(bot, update, "Unknown command. Use /help for a list of commands.")
+			switch update.Message.Command() {
+			case "start":
+				reply(bot, update, "Hi! I'm Gotigram.\nUse /help to see commands.")
+			case "help":
+				reply(bot, update, helpText)
+			case "subscribe":
+				handleSubscribe(bot, update)
+			case "unsubscribe":
+				handleUnsubscribe(bot, update)
+			case "subscriptions":
+				handleSubscriptions(bot, update)
+			case "apps":
+				handleApps(bot, update)
+			case "import":
+				handleImport(bot, update)
+			case "export":
+				handleExport(bot, update)
+			case "save":
+				handleSave(bot, update)
+			default:
+				reply(bot, update, "Unknown command. Use /help for a list of commands.")
+			}
 		}
 	}
 }
@@ -346,34 +371,52 @@ func reply(bot *tgbotapi.BotAPI, update tgbotapi.Update, text string) {
 	}
 }
 
-func sendWithRetry(bot *tgbotapi.BotAPI, msg tgbotapi.Chattable, maxRetries int) {
+func sendWithRetry(ctx context.Context, bot *tgbotapi.BotAPI, msg tgbotapi.Chattable, maxRetries int) {
 	if maxRetries <= 0 {
 		maxRetries = 1
 	}
+
 	backoff := time.Second
 	var err error
+
 	for i := 0; i < maxRetries; i++ {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		if _, err = bot.Send(msg); err == nil {
 			return
 		}
+
 		log.Printf("Telegram send failed (attempt %d/%d): %v", i+1, maxRetries, err)
-		// Don't retry client errors (4xx) — they will never succeed,
-		// except 429 (rate limited) which is retryable.
+
 		var apiErr *tgbotapi.Error
 		if errors.As(err, &apiErr) && apiErr.Code >= 400 && apiErr.Code < 500 {
 			if apiErr.Code == 429 && apiErr.RetryAfter > 0 {
 				backoff = time.Duration(apiErr.RetryAfter) * time.Second
-				log.Printf("Rate limited, retrying after %ds", apiErr.RetryAfter)
-				time.Sleep(backoff)
-				continue
+			} else {
+				return
 			}
-			return
 		}
+
 		if i < maxRetries-1 {
-			time.Sleep(backoff)
-			backoff *= 2
+			timer := time.NewTimer(backoff)
+			select {
+			case <-ctx.Done():
+				if !timer.Stop() {
+					<-timer.C
+				}
+				return
+			case <-timer.C:
+			}
+			if apiErr == nil || apiErr.Code != 429 {
+				backoff = min(backoff*2, 60*time.Second)
+			}
 		}
 	}
+
 	log.Printf("Telegram send failed after %d attempts: %v", maxRetries, err)
 }
 
@@ -785,42 +828,116 @@ func fetchApps() ([]GotifyApp, error) {
    Gotify WebSocket
 ------------------- */
 
-func listenGotify(bot *tgbotapi.BotAPI) {
-	streamURL := fmt.Sprintf("%s/stream?token=%s", GOTIFY_WS_URL, url.QueryEscape(GOTIFY_CLIENT_TOKEN))
+func splitTelegramText(text string, maxChars int) []string {
+	if maxChars <= 0 || len([]rune(text)) <= maxChars {
+		return []string{text}
+	}
 
-	// Buffered send queue: decouples WS reading from Telegram sending,
-	// caps memory usage, and preserves message order.
-	sendQueue := make(chan tgbotapi.Chattable, messageQueueSize)
-	defer close(sendQueue)
-	go func() {
-		for msg := range sendQueue {
-			sendWithRetry(bot, msg, maxRetries)
+	runes := []rune(text)
+	parts := make([]string, 0, (len(runes)+maxChars-1)/maxChars)
+	for len(runes) > maxChars {
+		cut := maxChars
+		for i := maxChars - 1; i >= maxChars/2; i-- {
+			if runes[i] == '\n' {
+				cut = i + 1
+				break
+			}
 		}
+		parts = append(parts, string(runes[:cut]))
+		runes = runes[cut:]
+	}
+	if len(runes) > 0 {
+		parts = append(parts, string(runes))
+	}
+	return parts
+}
+
+func waitForContext(ctx context.Context, d time.Duration) bool {
+	timer := time.NewTimer(d)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-timer.C:
+		return true
+	}
+}
+
+func listenGotify(ctx context.Context, bot *tgbotapi.BotAPI) {
+	streamURL := fmt.Sprintf("%s/stream?token=%s", GOTIFY_WS_URL, url.QueryEscape(GOTIFY_CLIENT_TOKEN))
+	sendQueue := make(chan tgbotapi.Chattable, messageQueueSize)
+
+	var senderWG sync.WaitGroup
+	senderWG.Add(1)
+	go func() {
+		defer senderWG.Done()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case msg, ok := <-sendQueue:
+				if !ok {
+					return
+				}
+				sendWithRetry(ctx, bot, msg, maxRetries)
+			}
+		}
+	}()
+
+	defer func() {
+		close(sendQueue)
+		senderWG.Wait()
 	}()
 
 	backoff := time.Second
 	const maxBackoff = 60 * time.Second
 
 	for {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+
 		log.Printf("Connecting to Gotify stream...")
 		conn, _, err := websocket.DefaultDialer.Dial(streamURL, nil)
 		if err != nil {
 			log.Printf("Failed to connect to Gotify WS: %v, retrying in %v", err, backoff)
-			time.Sleep(backoff)
+			if !waitForContext(ctx, backoff) {
+				return
+			}
 			backoff = min(backoff*2, maxBackoff)
 			continue
 		}
+
 		log.Println("Connected to Gotify stream")
+		backoff = time.Second
+
+		connDone := make(chan struct{})
+		go func() {
+			select {
+			case <-ctx.Done():
+				_ = conn.Close()
+			case <-connDone:
+			}
+		}()
 
 		for {
 			_, data, err := conn.ReadMessage()
 			if err != nil {
+				close(connDone)
+				_ = conn.Close()
+				if ctx.Err() != nil {
+					return
+				}
 				log.Printf("WebSocket error: %v, reconnecting in %v...", err, backoff)
-				conn.Close()
-				time.Sleep(backoff)
+				if !waitForContext(ctx, backoff) {
+					return
+				}
 				backoff = min(backoff*2, maxBackoff)
 				break
 			}
+
 			backoff = time.Second
 
 			var msg GotifyMessage
@@ -829,32 +946,29 @@ func listenGotify(bot *tgbotapi.BotAPI) {
 				continue
 			}
 
-			log.Printf("Message from app %d (priority %d)", msg.AppID, msg.Priority)
-
 			subMu.RLock()
 			sub, subscribed := subscriptions[msg.AppID]
 			subMu.RUnlock()
+			if !subscribed || msg.Priority < sub.Priority {
+				continue
+			}
 
-			if subscribed {
-				if msg.Priority >= sub.Priority {
-					log.Printf("Forwarding message: message priority %d >= subscription priority %d", msg.Priority, sub.Priority)
-					var buf bytes.Buffer
-					if err := telegramTemplate.Execute(&buf, msg); err != nil {
-						log.Printf("Failed to render template: %v", err)
-						continue
-					}
-					tg := tgbotapi.NewMessage(TELEGRAM_CHAT_ID, buf.String())
-					tg.ParseMode = string(sub.ParseMode)
-					select {
-					case sendQueue <- tg:
-					default:
-						log.Printf("Telegram send queue full, dropping message from app %d", msg.AppID)
-					}
-				} else {
-					log.Printf("Message priority %d < subscription priority %d, ignoring", msg.Priority, sub.Priority)
+			var buf bytes.Buffer
+			if err := telegramTemplate.Execute(&buf, msg); err != nil {
+				log.Printf("Failed to render template: %v", err)
+				continue
+			}
+
+			for _, part := range splitTelegramText(buf.String(), maxTelegramMessageLength) {
+				tg := tgbotapi.NewMessage(TELEGRAM_CHAT_ID, part)
+				tg.ParseMode = string(sub.ParseMode)
+				select {
+				case sendQueue <- tg:
+				case <-ctx.Done():
+					return
+				default:
+					log.Printf("Telegram send queue full, dropping message from app %d", msg.AppID)
 				}
-			} else {
-				log.Printf("Message from unsubscribed app %d, ignoring", msg.AppID)
 			}
 		}
 	}
