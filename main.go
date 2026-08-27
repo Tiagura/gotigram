@@ -5,9 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"html"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -21,12 +24,20 @@ import (
 /* -------------------
    Structs & Vars
 ------------------- */
+const (
+	ParseModePlain      ParseMode = ""
+	ParseModeMarkdown   ParseMode = "Markdown"
+	ParseModeMarkdownV2 ParseMode = "MarkdownV2"
+	ParseModeHTML       ParseMode = "HTML"
+)
+
+type ParseMode string
 
 type Subscription struct {
-	ID       int
-	Name     string
-	Priority int    // 0-10, default 0
-	Format   string // "", "Markdown", "MarkdownV2", "HTML"
+	ID        int
+	Name      string
+	Priority  int // 0-10, default 0
+	ParseMode ParseMode
 }
 
 type GotifyApp struct {
@@ -42,15 +53,17 @@ type GotifyMessage struct {
 }
 
 var (
-	GOTIFY_WS_URL       = mustEnv("GOTIFY_WS_URL")
-	GOTIFY_REST_URL     = mustEnv("GOTIFY_REST_URL")
-	GOTIFY_CLIENT_TOKEN = mustEnv("GOTIFY_CLIENT_TOKEN")
-	TELEGRAM_TOKEN      = mustEnv("TELEGRAM_TOKEN")
-	TELEGRAM_CHAT_ID    = mustInt64(mustEnv("TELEGRAM_CHAT_ID"))
-	SUBSCRIPTIONS_FILE  = getSubscriptionsFile()
-	PARSE_MODE      = getDefaultFormat()
+	GOTIFY_WS_URL              = mustEnv("GOTIFY_WS_URL")
+	GOTIFY_REST_URL            = mustEnv("GOTIFY_REST_URL")
+	GOTIFY_CLIENT_TOKEN        = mustEnv("GOTIFY_CLIENT_TOKEN")
+	TELEGRAM_TOKEN             = mustEnv("TELEGRAM_TOKEN")
+	TELEGRAM_CHAT_ID           = mustInt64(mustEnv("TELEGRAM_CHAT_ID"))
+	SUBSCRIPTIONS_FILE         = getSubscriptionsFile()
+	PARSE_MODE                 = getDefaultFormat()
 	DEFAULT_MESSAGE_QUEUE_SIZE = 100
-	MAX_RETRIES = 3
+	MAX_RETRIES                = 3
+
+	httpClient = &http.Client{Timeout: 10 * time.Second}
 
 	subscriptions = make(map[int]Subscription)
 	subMu         sync.RWMutex
@@ -112,27 +125,29 @@ var (
 // Unescape \n, \t, etc.
 func unescapeEnv(s string) string {
 	replacer := strings.NewReplacer(
-		`\\`, `\`,  // literal backslash
+		`\\`, `\`, // literal backslash
 		`\n`, "\n", // newline
 		`\t`, "\t", // tab
 	)
 	return replacer.Replace(s)
 }
 
-func parseFormat(s string) (string, error) {
+func parseFormat(s string) (ParseMode, error) {
 	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "", "plain":
+		return ParseModePlain, nil
 	case "markdown":
-		return "Markdown", nil
+		return ParseModeMarkdown, nil
 	case "markdownv2":
-		return "MarkdownV2", nil
+		return ParseModeMarkdownV2, nil
 	case "html":
-		return "HTML", nil
+		return ParseModeHTML, nil
 	default:
-		return "", fmt.Errorf("invalid format %q: must be Markdown, MarkdownV2, or HTML", s)
+		return ParseModeMarkdown, fmt.Errorf("invalid parse mode %q.", s)
 	}
 }
 
-func getDefaultFormat() string {
+func getDefaultFormat() ParseMode {
 	v := os.Getenv("PARSE_MODE")
 	if v == "" {
 		return "Markdown" // sensible fallback
@@ -205,14 +220,14 @@ func loadSubscriptionsFromFile(path string) {
 			continue
 		}
 
-		// Validate format, fall back to PARSE_MODE if missing
-		f, err := parseFormat(sub.Format)
-		if err != nil {
-			log.Printf("Invalid format %q for app ID %d in subscriptions file, defaulting to %s", sub.Format, sub.ID, PARSE_MODE)
-			f = PARSE_MODE
-		}
-		if f == "" {
-			f = PARSE_MODE
+		f := PARSE_MODE
+		if sub.ParseMode != "" {
+			parsed, err := parseFormat(string(sub.ParseMode))
+			if err != nil {
+				log.Printf("Invalid parse mode %q for app ID %d in subscriptions file, defaulting to %s", sub.ParseMode, sub.ID, PARSE_MODE)
+			} else {
+				f = parsed
+			}
 		}
 
 		// Check if app ID exists
@@ -223,10 +238,10 @@ func loadSubscriptionsFromFile(path string) {
 		}
 
 		subscriptions[sub.ID] = Subscription{
-			ID:       sub.ID,
-			Name:     name, // ensure we use the correct name from Gotify
-			Priority: sub.Priority,
-			Format:   f,
+			ID:        sub.ID,
+			Name:      name, // ensure we use the correct name from Gotify
+			Priority:  sub.Priority,
+			ParseMode: f,
 		}
 		added++
 	}
@@ -273,13 +288,17 @@ func main() {
 ------------------- */
 
 const helpText = `/apps
-/subscribe <app_id|all> [-p <priority, default 0>] [-f <Markdown|MarkdownV2|HTML, default Markdown>]
+/subscribe <app_id|all> [-p <priority, default 0>] [-f <Plain|Markdown|MarkdownV2|HTML, default Markdown>]
 /subscriptions
 /unsubscribe <app_id|app_id1,app_id2,...|all>
 /import <json_array>
 /export
 /save
 `
+
+func isAuthorized(update tgbotapi.Update) bool {
+	return update.Message != nil && update.Message.Chat.ID == TELEGRAM_CHAT_ID
+}
 
 func startTelegram(bot *tgbotapi.BotAPI) {
 	u := tgbotapi.NewUpdate(0)
@@ -288,6 +307,10 @@ func startTelegram(bot *tgbotapi.BotAPI) {
 
 	for update := range updates {
 		if update.Message == nil || !update.Message.IsCommand() {
+			continue
+		}
+		if !isAuthorized(update) {
+			log.Printf("Ignoring command from unauthorized chat %d", update.Message.Chat.ID)
 			continue
 		}
 
@@ -361,7 +384,7 @@ func sendWithRetry(bot *tgbotapi.BotAPI, msg tgbotapi.Chattable, maxRetries int)
 func handleSubscribe(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	arg := strings.TrimSpace(update.Message.CommandArguments())
 	if arg == "" {
-		reply(bot, update, "Usage: /subscribe <app_id|all> [-p <priority>] [-f <Markdown|MarkdownV2|HTML>]")
+		reply(bot, update, "Usage: /subscribe <app_id|all> [-p <priority>] [-f <Plain|Markdown|MarkdownV2|HTML>]")
 		return
 	}
 
@@ -370,7 +393,7 @@ func handleSubscribe(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	target := tokens[0]
 
 	priority := 0
-	format := PARSE_MODE
+	parseMode := PARSE_MODE
 
 	for i := 1; i < len(tokens); i++ {
 		switch tokens[i] {
@@ -397,9 +420,9 @@ func handleSubscribe(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 				reply(bot, update, err.Error())
 				return
 			}
-			format = f
+			parseMode = f
 		default:
-			reply(bot, update, fmt.Sprintf("Unknown flag %q. Usage: /subscribe <app_id|all> [-p <priority>] [-f <Markdown|MarkdownV2|HTML>]", tokens[i]))
+			reply(bot, update, fmt.Sprintf("Unknown flag %q. Usage: /subscribe <app_id|all> [-p <priority>] [-f <Plain|Markdown|MarkdownV2|HTML>]", tokens[i]))
 			return
 		}
 	}
@@ -416,16 +439,16 @@ func handleSubscribe(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	addOrUpdate := func(id int, name string) string {
 		sub, ok := subscriptions[id]
 		if ok {
-			if sub.Priority == priority && sub.Format == format {
-				return fmt.Sprintf("Already subscribed to %s (ID %d) with priority %d, format %q", name, id, priority, format)
+			if sub.Priority == priority && sub.ParseMode == parseMode {
+				return fmt.Sprintf("Already subscribed to %s (ID %d) with priority %d, parse mode %q", name, id, priority, parseMode)
 			}
 			sub.Priority = priority
-			sub.Format = format
+			sub.ParseMode = parseMode
 			subscriptions[id] = sub
-			return fmt.Sprintf("Updated %s (ID %d): priority %d, format %q", name, id, priority, format)
+			return fmt.Sprintf("Updated %s (ID %d): priority %d, parse mode %q", name, id, priority, parseMode)
 		}
-		subscriptions[id] = Subscription{ID: id, Name: name, Priority: priority, Format: format}
-		return fmt.Sprintf("Subscribed to %s (ID %d) with priority %d, format %q", name, id, priority, format)
+		subscriptions[id] = Subscription{ID: id, Name: name, Priority: priority, ParseMode: parseMode}
+		return fmt.Sprintf("Subscribed to %s (ID %d) with priority %d, parse mode %q", name, id, priority, parseMode)
 	}
 
 	if strings.EqualFold(target, "all") {
@@ -485,8 +508,13 @@ func handleUnsubscribe(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 			return
 		}
 
-		var messages []string
+		ids := make([]int, 0, len(subscriptions))
 		for id := range subscriptions {
+			ids = append(ids, id)
+		}
+		sort.Ints(ids)
+		var messages []string
+		for _, id := range ids {
 			messages = append(messages, remove(id))
 		}
 
@@ -542,13 +570,20 @@ func handleSubscriptions(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 		appDict[app.ID] = app.Name
 	}
 
+	ids := make([]int, 0, len(subsCopy))
+	for id := range subsCopy {
+		ids = append(ids, id)
+	}
+	sort.Ints(ids)
+
 	var lines []string
-	for id, sub := range subsCopy {
+	for _, id := range ids {
+		sub := subsCopy[id]
 		name := appDict[id]
 		if name == "" {
 			name = "Unknown"
 		}
-		lines = append(lines, fmt.Sprintf("%d: %s (priority %d, format %q)", id, name, sub.Priority, sub.Format))
+		lines = append(lines, fmt.Sprintf("%d: %s (priority %d, parse mode %q)", id, name, sub.Priority, sub.ParseMode))
 	}
 
 	reply(bot, update, "Current subscriptions:\n"+strings.Join(lines, "\n"))
@@ -564,11 +599,12 @@ func handleApps(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	subMu.RLock()
 	defer subMu.RUnlock()
 
+	sort.Slice(apps, func(i, j int) bool { return apps[i].ID < apps[j].ID })
 	var lines []string
 	for _, app := range apps {
 		status := "Not subscribed"
 		if sub, ok := subscriptions[app.ID]; ok {
-			status = fmt.Sprintf("Subscribed (priority %d, format %q)", sub.Priority, sub.Format)
+			status = fmt.Sprintf("Subscribed (priority %d, parse mode %q)", sub.Priority, sub.ParseMode)
 		}
 		lines = append(lines, fmt.Sprintf("%d: %s -> %s", app.ID, app.Name, status))
 	}
@@ -627,21 +663,21 @@ func handleImport(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 			sub.Priority = 0
 		}
 
-		// Validate format, fall back to PARSE_MODE if missing
-		f, err := parseFormat(sub.Format)
-		if err != nil {
-			warnings = append(warnings, fmt.Sprintf("Invalid format %q for app ID %d, defaulting to %s", sub.Format, sub.ID, PARSE_MODE))
-			f = PARSE_MODE
-		}
-		if f == "" {
-			f = PARSE_MODE
+		f := PARSE_MODE
+		if sub.ParseMode != "" {
+			parsed, err := parseFormat(string(sub.ParseMode))
+			if err != nil {
+				warnings = append(warnings, fmt.Sprintf("Invalid parse mode %q for app ID %d, defaulting to %s", sub.ParseMode, sub.ID, PARSE_MODE))
+			} else {
+				f = parsed
+			}
 		}
 
 		subscriptions[sub.ID] = Subscription{
-			ID:       sub.ID,
-			Name:     name, // use Gotify app name
-			Priority: sub.Priority,
-			Format:   f,
+			ID:        sub.ID,
+			Name:      name, // use Gotify app name
+			Priority:  sub.Priority,
+			ParseMode: f,
 		}
 		added++
 	}
@@ -668,6 +704,7 @@ func handleExport(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 		export = append(export, sub)
 	}
 	subMu.RUnlock()
+	sort.Slice(export, func(i, j int) bool { return export[i].ID < export[j].ID })
 
 	data, err := json.MarshalIndent(export, "", "  ")
 	if err != nil {
@@ -675,11 +712,9 @@ func handleExport(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 		return
 	}
 
-	msg := tgbotapi.NewMessage(
-		update.Message.Chat.ID,
-		"```json\n"+string(data)+"\n```",
-	)
-	msg.ParseMode = "Markdown"
+	text := "<pre>" + html.EscapeString(string(data)) + "</pre>"
+	msg := tgbotapi.NewMessage(update.Message.Chat.ID, text)
+	msg.ParseMode = string(ParseModeHTML)
 
 	if _, err := bot.Send(msg); err != nil {
 		log.Printf("Failed to send export message: %v", err)
@@ -696,10 +731,11 @@ func handleSave(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
 	}
 
 	// Create slice for JSON
-	var subs []Subscription
+	subs := make([]Subscription, 0, len(subscriptions))
 	for _, sub := range subscriptions {
 		subs = append(subs, sub)
 	}
+	sort.Slice(subs, func(i, j int) bool { return subs[i].ID < subs[j].ID })
 
 	data, err := json.MarshalIndent(subs, "", "  ")
 	if err != nil {
@@ -728,7 +764,7 @@ func fetchApps() ([]GotifyApp, error) {
 	}
 	req.Header.Set("X-Gotify-Key", GOTIFY_CLIENT_TOKEN)
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
@@ -750,7 +786,7 @@ func fetchApps() ([]GotifyApp, error) {
 ------------------- */
 
 func listenGotify(bot *tgbotapi.BotAPI) {
-	url := fmt.Sprintf("%s/stream?token=%s", GOTIFY_WS_URL, GOTIFY_CLIENT_TOKEN)
+	streamURL := fmt.Sprintf("%s/stream?token=%s", GOTIFY_WS_URL, url.QueryEscape(GOTIFY_CLIENT_TOKEN))
 
 	// Buffered send queue: decouples WS reading from Telegram sending,
 	// caps memory usage, and preserves message order.
@@ -767,7 +803,7 @@ func listenGotify(bot *tgbotapi.BotAPI) {
 
 	for {
 		log.Printf("Connecting to Gotify stream...")
-		conn, _, err := websocket.DefaultDialer.Dial(url, nil)
+		conn, _, err := websocket.DefaultDialer.Dial(streamURL, nil)
 		if err != nil {
 			log.Printf("Failed to connect to Gotify WS: %v, retrying in %v", err, backoff)
 			time.Sleep(backoff)
@@ -808,11 +844,11 @@ func listenGotify(bot *tgbotapi.BotAPI) {
 						continue
 					}
 					tg := tgbotapi.NewMessage(TELEGRAM_CHAT_ID, buf.String())
-					tg.ParseMode = sub.Format
+					tg.ParseMode = string(sub.ParseMode)
 					select {
-						case sendQueue <- tg:	
-						default:
-							log.Printf("Telegram send queue full, dropping message from app %d", msg.AppID)
+					case sendQueue <- tg:
+					default:
+						log.Printf("Telegram send queue full, dropping message from app %d", msg.AppID)
 					}
 				} else {
 					log.Printf("Message priority %d < subscription priority %d, ignoring", msg.Priority, sub.Priority)
