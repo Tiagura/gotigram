@@ -34,10 +34,11 @@ runs:
       shell: bash
       env:
         BASE_REF: ${{ github.event.pull_request.base.ref }}
+        INPUT_PATHS: ${{ inputs.paths }}
       run: |
         set -euo pipefail
 
-        if git diff --quiet "origin/$BASE_REF"...HEAD -- ${{ inputs.paths }}; then
+        if git diff --quiet "origin/$BASE_REF"...HEAD -- $INPUT_PATHS; then
           echo "changed=false" >> "$GITHUB_OUTPUT"
         else
           echo "changed=true" >> "$GITHUB_OUTPUT"

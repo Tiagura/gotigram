@@ -33,7 +33,7 @@ jobs:
 
       - name: Check for changes
         id: check-changes
-        uses: ./.github/workflows/actions/changed-paths
+        uses: $/.github/workflows/actions/changed-paths
         with:
           paths: .github/workflows/
           checkout-depth: ${{ steps.depth.outputs.depth }}
@@ -52,14 +52,12 @@ jobs:
           cat > .github/actionlint.yaml <<'EOF'
 
           paths:
-            .github/workflows/actions/changed-paths/action.yml:
+            .github/workflows/actions/**/*.{yml,yaml}:
               ignore:
-                - '.+'
+                - '.*'
 
             .github/workflows/**/*.{yml,yaml}:
               ignore:
-                - 'shellcheck reported issue in this script: SC2001:.+'
-                - 'shellcheck reported issue in this script: SC2086:.+'
                 - 'shellcheck reported issue in this script: SC2129:.+'
           EOF
 
