@@ -23,6 +23,9 @@ go.work.sum
 # Go module cache
 *.modcache/
 
+# Folders 
+subscriptions/
+
 # -----------------------------
 # Logs
 # -----------------------------
