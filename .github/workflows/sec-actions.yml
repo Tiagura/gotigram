@@ -33,7 +33,7 @@ jobs:
 
       - name: Check for changes
         id: check-changes
-        uses: $/.github/workflows/actions/changed-paths
+        uses: ./.github/workflows/actions/changed-paths
         with:
           paths: .github/workflows/
           checkout-depth: ${{ steps.depth.outputs.depth }}
@@ -72,4 +72,4 @@ jobs:
           persona: regular
           online-audits: false
           advanced-security: false
-          min-severity: low
+          min-severity: medium
