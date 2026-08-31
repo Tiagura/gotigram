@@ -57,7 +57,7 @@ jobs:
 
             echo ""
             echo "Run the following locally:"
-            echo "  gofmt -w ."
+            echo "  gofmt -w src"
 
             exit 1
           fi

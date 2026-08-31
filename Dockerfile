@@ -1,4 +1,4 @@
-FROM golang:1.24-alpine AS builder
+FROM golang:1.27-alpine AS builder
 
 WORKDIR /app
 RUN apk add --no-cache ca-certificates
@@ -25,6 +25,6 @@ RUN go build -trimpath -ldflags="-s -w" -o gotigram ./src/
 FROM gcr.io/distroless/base-debian13
 
 WORKDIR /app
-COPY --from=builder /app/gotigram /app/gotigram
+COPY --from=builder /app/gotigram ./gotigram
 
-ENTRYPOINT ["/app/gotigram"]
+ENTRYPOINT ["./gotigram"]
