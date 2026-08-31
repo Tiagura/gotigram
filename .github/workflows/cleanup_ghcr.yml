@@ -12,7 +12,7 @@ permissions:
 jobs:
   cleanup-ghcr:
     name: Clean up old GHCR images
-    runs-on: dps-pod-dind
+    runs-on: ubuntu-latest
 
     steps:
       - name: Delete old alpha images

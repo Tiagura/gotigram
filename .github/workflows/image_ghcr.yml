@@ -27,7 +27,7 @@ jobs:
       group: ${{ github.repository }}-${{ github.sha }}-build-image
       cancel-in-progress: false
 
-    runs-on: dps-pod-dind
+    runs-on: ubuntu-latest
 
     outputs:
       image_url: ${{ steps.meta.outputs.image_url }}
