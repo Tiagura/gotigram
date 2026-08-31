@@ -13,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  go-quality:
+  code-quality:
     runs-on: ubuntu-latest
 
     steps:

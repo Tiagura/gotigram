@@ -28,8 +28,8 @@ type ParseMode string
 type QueueFullBehavior string
 
 const (
-	QueueFullDrop  QueueFullBehavior = "drop"
-	QueueFullFIFO  QueueFullBehavior = "fifo"
+	QueueFullDrop QueueFullBehavior = "drop"
+	QueueFullFIFO QueueFullBehavior = "fifo"
 )
 
 type Config struct {
