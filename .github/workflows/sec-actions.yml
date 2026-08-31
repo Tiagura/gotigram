@@ -1,4 +1,4 @@
-name: CI Security Actions Analysis
+name: CI Security Scan Actions
 
 on:
   pull_request:
@@ -39,7 +39,7 @@ jobs:
           checkout-depth: ${{ steps.depth.outputs.depth }}
 
       - name: Install actionlint
-        if: ${{ steps.check-changes.outputs.changed == 'false' }}
+        if: ${{ steps.check-changes.outputs.changed == 'true' }}
         run: |
           wget -qO- https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash \
             | bash -s -- 1.7.12
