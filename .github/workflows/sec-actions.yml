@@ -1,0 +1,69 @@
+name: CI Security Actions Analysis
+
+on:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  sec-scan:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Compute checkout depth
+        id: depth
+        run: |
+          echo "depth=$((${{ github.event.pull_request.commits }} + 2))" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: ${{ steps.depth.outputs.depth }}
+          fetch-tags: false
+          filter: blob:none
+
+      - name: Check for changes
+        id: check-changes
+        uses: ./.github/workflows/actions/changed-paths
+        with:
+          paths: .github/workflows/
+          checkout-depth: ${{ steps.depth.outputs.depth }}
+
+      - name: Install actionlint
+        if: ${{ steps.check-changes.outputs.changed == 'false' }}
+        run: |
+          wget -qO- https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash \
+            | bash -s -- 1.7.12
+
+          mv actionlint /usr/local/bin/actionlint
+
+      - name: Set up actionlint config
+        if: ${{ steps.check-changes.outputs.changed == 'true' }}
+        run: |
+          cat > .github/actionlint.yaml <<'EOF'
+
+          paths:
+            .github/workflows/**/*.{yml,yaml}:
+          EOF
+
+      - name: Run actionlint
+        if: ${{ steps.check-changes.outputs.changed == 'true' }}
+        run: actionlint
+
+      - name: Run zizmor
+        if: ${{ steps.check-changes.outputs.changed == 'true' }}
+        uses: zizmorcore/zizmor-action@70fb788f84895a7701f5643d103d587e460b5c99 # v0.6.3
+        with:
+          persona: regular
+          online-audits: false
+          advanced-security: false
+          min-severity: low
