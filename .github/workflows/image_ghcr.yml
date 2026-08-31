@@ -118,14 +118,14 @@ jobs:
             exit 1
           fi
 
-          IMAGE_URL="${REGISTRY}/${REPO_NAME}/gotigram:${RELEASE}"
+          IMAGE_URL="${REGISTRY}/${REPO_NAME}:${RELEASE}"
           IMAGE_TAG="${RELEASE}"
 
           echo "image_url=${IMAGE_URL}" >> "$GITHUB_OUTPUT"
           echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
 
           if [ "$REF_TYPE" = "tag" ]; then
-            echo "latest_url=${REGISTRY}/${REPO_NAME}/gotigram:latest" >> "$GITHUB_OUTPUT"
+            echo "latest_url=${REGISTRY}/${REPO_NAME}:latest" >> "$GITHUB_OUTPUT"
           else
             echo "latest_url=" >> "$GITHUB_OUTPUT"
           fi
@@ -137,6 +137,9 @@ jobs:
           echo "| Component | URL | Tag |" >> "$GITHUB_STEP_SUMMARY"
           echo "|-----------|-----|-----|" >> "$GITHUB_STEP_SUMMARY"
           echo "| gotigram | ${IMAGE_URL} | ${IMAGE_TAG} |" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$REF_TYPE" = "tag" ]; then
+            echo "| gotigram | ${REGISTRY}/${REPO_NAME}:latest | latest |" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Log in to GHCR
         uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee   # v4.2.0

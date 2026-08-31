@@ -18,9 +18,9 @@ jobs:
       - name: Delete old alpha images
         uses: snok/container-retention-policy@d3bdcf5ce9b05f685154e4a16c39233b245e3d53   # v3.1.0
         with:
-          account: Tiagura
-          token: ${{ github.token }}
-          image-names: "gotigram"
+          account: ${{ github.repository_owner }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+          image-names: "Tiagura/gotigram"
           image-tags: "alpha-*"
           cut-off: 2w
           keep-n-most-recent: 10
