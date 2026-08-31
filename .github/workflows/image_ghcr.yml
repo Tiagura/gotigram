@@ -179,8 +179,11 @@ jobs:
         if: ${{ inputs.force_rebuild == true || steps.check.outputs.skip != 'true' }}
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf   # v7.2.0
         with:
+          platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ steps.meta.outputs.image_url }}
+          tags: |
+            ${{ steps.meta.outputs.image_url }}
+            ${{ steps.meta.outputs.latest_url }}
           labels: |
             org.opencontainers.image.created=${{ steps.meta.outputs.created }}
             org.opencontainers.image.authors="Tiago Afonso Marques"
