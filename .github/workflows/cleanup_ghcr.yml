@@ -16,7 +16,7 @@ jobs:
 
     steps:
       - name: Delete old alpha images
-        uses: snok/container-retention-policy@d3bdcf5ce9b05f685154e4a16c39233b245e3d53   # v3.1.0
+        uses: snok/container-retention-policy@d3bdcf5ce9b05f685154e4a16c39233b245e3d53 # v3.1.0
         with:
           account: ${{ github.repository_owner }}
           token: ${{ secrets.GITHUB_TOKEN }}
