@@ -7,9 +7,8 @@ RUN apk add --no-cache ca-certificates
 COPY go.mod go.sum ./
 RUN go mod download
 
-
 # Copy source
-COPY main.go ./
+COPY src ./src
 
 # Use Buildx platform args
 ARG TARGETOS
@@ -18,7 +17,7 @@ ENV CGO_ENABLED=0
 ENV GOOS=$TARGETOS
 ENV GOARCH=$TARGETARCH
 
-RUN go build -trimpath -ldflags="-s -w" -o gotigram
+RUN go build -trimpath -ldflags="-s -w" -o gotigram ./src/
 
 # --- Distroless runtime image ---
 

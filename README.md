@@ -121,10 +121,6 @@ Example `subscriptions.json`
 git clone https://github.com/Tiagura/gotigram.git
 cd gotigram
 
-go mod tidy
-
-go build -o gotigram main.go
-
 export GOTIFY_WS_URL=ws://<GOTIFY_SERVER>:<WS_PORT>
 export GOTIFY_REST_URL=http(s)://<GOTIFY_SERVER>:<REST_PORT>
 export GOTIFY_CLIENT_TOKEN=<YOUR_GOTIFY_CLIENT_TOKEN>
@@ -132,6 +128,13 @@ export TELEGRAM_TOKEN=<YOUR_TELEGRAM_BOT_TOKEN>
 export TELEGRAM_CHAT_ID=<YOUR_TELEGRAM_CHAT_ID>
 # Set optional variables if needed the same way
 
+go mod tidy
+
+# Option 1: go run
+go run ./src/
+
+# Option 2: executable program
+go build -o gotigram ./src/
 ./gotigram
 ```
 
@@ -139,7 +142,7 @@ export TELEGRAM_CHAT_ID=<YOUR_TELEGRAM_CHAT_ID>
 
 #### Using a local build
 
-[Example file](local-docker-compose.yml)
+[Example file](docker-compose-local.yml)
 
 ```bash
 git clone https://github.com/Tiagura/gotigram.git
@@ -147,7 +150,7 @@ cd gotigram
 mkdir subscriptions
 export MYUID=$(id -u)
 export MYGID=$(id -g)
-docker compose -f local-docker-compose.yml up -d
+docker compose -f docker-compose-local.yml up -d
 ```
 
 #### Using Docker Hub image
