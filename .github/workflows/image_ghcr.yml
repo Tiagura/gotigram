@@ -189,7 +189,8 @@ jobs:
             org.opencontainers.image.authors="Tiago Afonso Marques"
             org.opencontainers.image.url="https://github.com/Tiagura/gotigram"
             org.opencontainers.image.source="https://github.com/Tiagura/gotigram"
+            org.opencontainers.image.version=${{ steps.meta.outputs.image_tag }}
             org.opencontainers.image.revision=${{ github.sha }}-${{ steps.meta.outputs.revision }}
-            org.opencontainers.image.licenses="MIT"
+            org.opencontainers.image.licenses="MIT (see https://github.com/Tiagura/gotigram/blob/${{ github.sha }}/LICENSE)"
             org.opencontainers.image.title="Gotigram"
             org.opencontainers.image.description="Telegram bot that bridges your Gotify notifications directly to your Telegram DMs"
