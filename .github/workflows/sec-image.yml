@@ -32,7 +32,7 @@ jobs:
 
       - name: Check for changes
         id: check-changes
-        uses: ./.github/actions/changed-paths
+        uses: .github/workflows/actions/changed-paths
         with:
           paths: src/ Dockerfile go.mod go.sum
           checkout-depth: ${{ steps.depth.outputs.depth }}
