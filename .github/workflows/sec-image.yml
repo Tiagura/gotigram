@@ -1,21 +1,9 @@
-name: Security Scan Image
+name: CI Security Scan Image
 
 on:
   pull_request:
-    paths:
-      - '/src/**'
-      - 'Dockerfile'
-      - 'go.mod'
-      - 'go.sum'
-
-  push:
     branches:
       - main
-    paths:
-      - '/src/**'
-      - 'Dockerfile'
-      - 'go.mod'
-      - 'go.sum'
 
 permissions:
   contents: read
@@ -29,16 +17,38 @@ jobs:
       security-events: write
 
     steps:
+      - name: Compute checkout depth
+        id: depth
+        run: |
+          echo "depth=$((${{ github.event.pull_request.commits }} + 2))" >> "$GITHUB_OUTPUT"
+
       - name: Checkout repository
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          ref: ${{ github.ref }}
+          fetch-depth: ${{ steps.depth.outputs.depth }}
+          fetch-tags: false
+          filter: blob:none
+
+      - name: Check for changes
+        id: check-changes
+        uses: ./.github/actions/changed-paths
+        with:
+          paths: src/ Dockerfile go.mod go.sum
+          checkout-depth: ${{ steps.depth.outputs.depth }}
+
+      - name: Skip security scan if no changes
+        if: ${{ steps.check-changes.outputs.changed == 'false' }}
+        run: |
+          echo "No changes detected in the specified paths."
+          echo "Security scan is not required."
 
       - name: Set up Docker Buildx
+        if: ${{ steps.check-changes.outputs.changed == 'true' }}
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
 
       - name: Build image
+        if: ${{ steps.check-changes.outputs.changed == 'true' }}
         uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
         with:
           context: .
@@ -48,18 +58,10 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Run Trivy vulnerability scanner
+        if: ${{ steps.check-changes.outputs.changed == 'true' }}
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: gotigram:security-scan
-          format: template
-          template: '@/contrib/sarif.tpl'
-          output: trivy-results.sarif
           severity: CRITICAL,HIGH
           ignore-unfixed: true
           exit-code: '1'
-
-      - name: Upload Trivy security report
-        if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && always() }}
-        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
-        with:
-          sarif_file: trivy-results.sarif

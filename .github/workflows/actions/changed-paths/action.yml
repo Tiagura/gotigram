@@ -1,0 +1,44 @@
+name: Check path(s) change(s)
+description: Checks whether any files in the specified paths changed in a pull request.
+
+inputs:
+  paths:
+    description: Single line space-separated paths to check
+    required: true
+
+  checkout-depth:
+    description: Depth used to fetch the base branch
+    required: true
+
+outputs:
+  changed:
+    description: Whether any matching files/files under the specified paths changed
+    value: ${{ steps.check.outputs.changed }}
+
+runs:
+  using: composite
+  
+  steps:
+    - name: Fetch base branch
+      shell: bash
+      env:
+        BASE_REF: ${{ github.event.pull_request.base.ref }}
+        DEPTH: ${{ inputs.checkout-depth }}
+      run: |
+        set -euo pipefail
+
+        git fetch --no-tags --depth="$DEPTH" origin "$BASE_REF"
+
+    - name: Check path(s)
+      id: check
+      shell: bash
+      env:
+        BASE_REF: ${{ github.event.pull_request.base.ref }}
+      run: |
+        set -euo pipefail
+
+        if git diff --quiet "origin/$BASE_REF"...HEAD -- ${{ inputs.paths }}; then
+          echo "changed=false" >> "$GITHUB_OUTPUT"
+        else
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+        fi
