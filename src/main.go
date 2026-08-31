@@ -15,17 +15,22 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	cfg := loadConfig()
+	cfg, err := LoadConfig()
+	if err != nil {
+		log.Fatalf("Configuration error: %v", err)
+	}
 	bot, err := tgbotapi.NewBotAPI(cfg.TelegramToken)
 	if err != nil {
 		log.Fatal(err)
 	}
 	log.Printf("Authorized as %s", bot.Self.UserName)
-	log.Printf("Subscriptions file: %s", cfg.SubscriptionsFile)
+	log.Printf("Configuration:\n%s", cfg.String())
 
 	app := NewApp(cfg, bot)
 	if cfg.SubscriptionsFile != "" {
-		app.LoadSubscriptions(cfg.SubscriptionsFile)
+		if err := app.LoadSubscriptions(cfg.SubscriptionsFile); err != nil {
+			log.Fatalf("Failed to load subscriptions: %v", err)
+		}
 	}
 
 	var wg sync.WaitGroup
