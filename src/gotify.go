@@ -32,7 +32,7 @@ func (g *GotifyClient) FetchApps() ([]GotifyApp, error) {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Gotify returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("Gotify application request returned HTTP %d", resp.StatusCode)
 	}
 
 	var apps []GotifyApp
@@ -181,12 +181,35 @@ func (g *GotifyClient) Listen(ctx context.Context) {
 				} else {
 					tg.ParseMode = string(sub.ParseMode)
 				}
-				select {
-				case sendQueue <- tg:
-				case <-ctx.Done():
-					return
-				default:
-					log.Printf("Telegram send queue full, dropping message from app %d", msg.AppID)
+				switch g.app.Config.QueueFullBehavior {
+				case QueueFullFIFO:
+					select {
+					case sendQueue <- tg:
+					default:
+							// Queue is full: evict the oldest queued message to make room,
+							// so the queue always holds the most recent messages rather than
+							// stalling the reader or silently dropping the newest one.
+							select {
+							case <-sendQueue:
+									log.Printf("Telegram send queue full; dropping oldest queued message to make room for message from app %d", msg.AppID)
+							default:
+									// Queue drained concurrently by the worker between the two
+									// selects above - nothing to evict, just proceed to enqueue.
+							}
+							select {
+							case sendQueue <- tg:
+							case <-ctx.Done():
+									return
+							}
+					}
+				case QueueFullDrop:
+					select {
+					case sendQueue <- tg:
+					case <-ctx.Done():
+						return
+					default:
+						log.Printf("Telegram send queue full; dropping message from app %d", msg.AppID)
+					}
 				}
 			}
 		}

@@ -8,32 +8,28 @@ import (
 	"sort"
 )
 
-func (a *App) LoadSubscriptions(path string) {
+func (a *App) LoadSubscriptions(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
-		log.Printf("Failed to read subscriptions file %s: %v", path, err)
-		// If file doesn't exist it means no subscriptions yet, so just create an empty one
 		if os.IsNotExist(err) {
-			log.Printf("Creating empty subscriptions file at %s", path)
-			err = os.WriteFile(path, []byte("[]"), 0644)
-			if err != nil {
-				log.Printf("Failed to create empty subscriptions file at %s: %v", path, err)
+			log.Printf("Subscriptions file %s does not exist; starting with no subscriptions", path)
+			if err := os.WriteFile(path, []byte("[]"), 0644); err != nil {
+				return fmt.Errorf("create empty subscriptions file %s: %w", path, err)
 			}
+			return nil
 		}
-		return
+		return fmt.Errorf("read subscriptions file %s: %w", path, err)
 	}
 
 	var subs []Subscription
 	if err := json.Unmarshal(data, &subs); err != nil {
-		log.Printf("Failed to parse subscriptions JSON from %s: %v", path, err)
-		return
+		return fmt.Errorf("parse subscriptions JSON from %s: %w", path, err)
 	}
 
 	// Fetch current Gotify applications
 	apps, err := a.Gotify.FetchApps()
 	if err != nil {
-		log.Printf("Failed to fetch Gotify apps while loading subscriptions: %v", err)
-		return
+		return fmt.Errorf("fetch Gotify apps while loading subscriptions: %w", err)
 	}
 
 	// Build a map for quick lookup
@@ -51,9 +47,6 @@ func (a *App) LoadSubscriptions(path string) {
 		}
 
 		f := a.Config.DefaultParseMode
-		// if parse mode is missing, use default; if it's invalid, log and use default
-		// missing means nil, invalid means not one of the allowed values
-
 		if sub.ParseMode != "" {
 			parsed, err := parseFormat(string(sub.ParseMode))
 			if err != nil {
@@ -80,6 +73,7 @@ func (a *App) LoadSubscriptions(path string) {
 	}
 
 	log.Printf("Loaded %d subscriptions from %s", added, path)
+	return nil
 }
 
 func (a *App) SaveSubscriptions(path string) error {

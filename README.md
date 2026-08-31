@@ -59,6 +59,7 @@ To connect Gotigram to these services, you must provide certain configuration va
 | `MESSAGE_QUEUE_SIZE`  | Number of messages to be stored in the message queue. Defaults to `100`. Must be greater than `0`. |
 | `MAX_RETRIES`         | Maximum number of retry attempts when sending a message to Telegram fails. Defaults to `3`. Must be greater than `0`. |
 | `PARSE_MODE`          | Controls how Telegram renders message formatting via the Bot API `parse_mode`. Supported values: `Plain`, `Markdown`, `MarkdownV2`, and `HTML`. Defaults to `Markdown` if not set. |
+| `QUEUE_FULL_BEHAVIOR` | Behavior when the message queue is full. Supported values: `drop`, `fifo`. Defaults to `drop` if not set. |
 | `TELEGRAM_TEMPLATE`   | Custom Go `text/template` for Telegram messages. Available variables: `{{.Title}}` and `{{.Message}}`. Defaults to `{{.Title}}\n\n{{.Message}}`. |
 | `SUBSCRIPTIONS_FILE`  | Path to a JSON file containing predefined subscriptions. Defaults to `subscriptions.json`. See [how to use](#subscriptions-configuration-file). |
 
@@ -83,7 +84,7 @@ The file must contain a JSON array of subscription objects, which have the follo
 | `ID`       | Yes      | Gotify application ID                                                                           |
 | `Name`     | No       | Human-readable application name (used in Telegram messages; defaults to `""` if omitted)        |
 | `Priority` | No       | Minimum priority (0–10) for notifications. Defaults to `0`                                      |
-| `Format`   | No       | Message parse mode. Check [`PARSE_MODE`](#optional-environment-variables) env var.              |
+| `ParseMode`| No       | Message parse mode. Check [`PARSE_MODE`](#optional-environment-variables) env var.              |
 
 
 Example `subscriptions.json`
