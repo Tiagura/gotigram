@@ -20,7 +20,7 @@ jobs:
         with:
           account: ${{ github.repository_owner }}
           token: ${{ secrets.GITHUB_TOKEN }}
-          image-names: ${{ github.repository }}
+          image-names: ${{ github.event.repository.name }}
           image-tags: "alpha-*"
           cut-off: 2w
           keep-n-most-recent: 10
