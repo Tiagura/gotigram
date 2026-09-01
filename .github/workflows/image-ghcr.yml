@@ -1,0 +1,195 @@
+name: Build and Push to GHCR
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*.*.*'
+      - '*.*.*'
+
+  # Manual trigger to build and push images to GHCR
+  workflow_dispatch:
+    inputs:
+      force_rebuild:
+        type: boolean
+        description: "Force rebuild and push even if image already exists in GHCR"
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-and-push:
+    concurrency:
+      group: ${{ github.repository }}-${{ github.sha }}-build-image
+      cancel-in-progress: false
+
+    runs-on: ubuntu-latest
+
+    outputs:
+      image_url: ${{ steps.meta.outputs.image_url }}
+      image_tag: ${{ steps.meta.outputs.image_tag }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          ref: ${{ github.ref }}
+          fetch-depth: 0
+
+      # Derive image tags from the ref type:
+      #
+      # Branch:
+      #   Alpha
+      #   alpha-<normalised_branch>-<commit_hash>
+      #
+      # Tag:
+      #   Final release
+      #   <version>
+      #
+      # Examples:
+      #   feat/foo              -> feat_foo-a1b2c3d
+      #   feature/ABC-123       -> feature_abc-123-a1b2c3d
+      #   v1.2.3                -> 1.2.3
+      #   1.2.3                 -> 1.2.3
+      #
+      - name: Compute release label
+        id: meta
+        env:
+          REF_NAME: ${{ github.ref_name }}
+          REF_TYPE: ${{ github.ref_type }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          REF="$REF_NAME"
+          DATE=$(date -u +"%Y%m%d%H%M")
+          CREATED=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+          REVISION="r${DATE}"
+          REGISTRY="ghcr.io"
+          REPO_NAME=$(echo "$REPO" | tr '[:upper:]' '[:lower:]')
+
+          # ------------------------------------------------------------
+          # Branch -> Alpha
+          # ------------------------------------------------------------
+          if [ "$REF_TYPE" = "branch" ]; then
+            BRANCH="$REF"
+
+            BRANCH_NORMALIZED=$(echo "$BRANCH" \
+              | tr '[:upper:]' '[:lower:]' \
+              | sed 's|/|_|g' \
+              | sed 's|[^a-z0-9_.-]|_|g' \
+              | sed 's|__*|_|g')
+
+            COMMIT_HASH=$(git rev-parse --short HEAD)
+
+            RELEASE="alpha-${BRANCH_NORMALIZED}-${COMMIT_HASH}"
+
+            echo "Release type: Alpha"
+            echo "Branch: $BRANCH"
+
+          # ------------------------------------------------------------
+          # Tag -> Final
+          # ------------------------------------------------------------
+          elif [ "$REF_TYPE" = "tag" ]; then
+
+            # Remove optional "v" prefix.
+            VERSION="${REF#v}"
+
+            # Validate semantic version.
+            if ! echo "$VERSION" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+              echo "::error::Tag '$REF' is not a valid release version."
+              echo "Expected format: X.Y.Z or vX.Y.Z"
+              exit 1
+            fi
+
+            RELEASE="$VERSION"
+
+            echo "Release type: Final"
+            echo "Tag: $REF"
+            echo "Version: $VERSION"
+
+          else
+            echo "::error::Unsupported GitHub ref type: $REF_TYPE"
+            exit 1
+          fi
+
+          IMAGE_URL="${REGISTRY}/${REPO_NAME}:${RELEASE}"
+          IMAGE_TAG="${RELEASE}"
+
+          echo "image_url=${IMAGE_URL}" >> "$GITHUB_OUTPUT"
+          echo "image_tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+
+          if [ "$REF_TYPE" = "tag" ]; then
+            echo "latest_url=${REGISTRY}/${REPO_NAME}:latest" >> "$GITHUB_OUTPUT"
+          else
+            echo "latest_url=" >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "created=${CREATED}" >> "$GITHUB_OUTPUT"
+          echo "revision=${REVISION}" >> "$GITHUB_OUTPUT"
+
+          echo "### Image" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Component | URL | Tag |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|-----------|-----|-----|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| gotigram | ${IMAGE_URL} | ${IMAGE_TAG} |" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$REF_TYPE" = "tag" ]; then
+            echo "| gotigram | ${REGISTRY}/${REPO_NAME}:latest | latest |" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Log in to GHCR
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check if image already exists in GHCR
+        if: ${{ inputs.force_rebuild == false }}
+        id: check
+        run: |
+          SKIP=true
+
+          if docker manifest inspect "${{ steps.meta.outputs.image_url }}" > /dev/null 2>&1; then
+            echo "Image found:    ${{ steps.meta.outputs.image_url }}"
+          else
+            echo "Image missing:  ${{ steps.meta.outputs.image_url }}"
+            SKIP=false
+          fi
+
+          if [ "$SKIP" = "true" ]; then
+            echo "Image already exists in GHCR. Skipping build and push."
+          else
+            echo "Image does not exist in GHCR. Proceeding with build and push."
+          fi
+
+          echo "skip=${SKIP}" >> "$GITHUB_OUTPUT"
+
+      # Set up Docker Buildx for advanced caching and multi-platform builds.
+      - name: Set up Docker Buildx
+        if: ${{ inputs.force_rebuild == true || steps.check.outputs.skip != 'true' }}
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      # Build and push the image.
+      - name: Build and push image
+        if: ${{ inputs.force_rebuild == true || steps.check.outputs.skip != 'true' }}
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.image_url }}
+            ${{ steps.meta.outputs.latest_url }}
+          labels: |
+            org.opencontainers.image.created=${{ steps.meta.outputs.created }}
+            org.opencontainers.image.authors="Tiago Afonso Marques"
+            org.opencontainers.image.url="https://github.com/Tiagura/gotigram"
+            org.opencontainers.image.source="https://github.com/Tiagura/gotigram"
+            org.opencontainers.image.version=${{ steps.meta.outputs.image_tag }}
+            org.opencontainers.image.revision=${{ github.sha }}-${{ steps.meta.outputs.revision }}
+            org.opencontainers.image.licenses="MIT (see https://github.com/Tiagura/gotigram/blob/${{ github.sha }}/LICENSE)"
+            org.opencontainers.image.title="Gotigram"
+            org.opencontainers.image.description="Telegram bot that bridges your Gotify notifications directly to your Telegram DMs"

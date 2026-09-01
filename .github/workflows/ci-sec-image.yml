@@ -1,0 +1,67 @@
+name: CI Security Scan Image
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  sec-scan:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Compute checkout depth
+        id: depth
+        run: |
+          echo "depth=$((${{ github.event.pull_request.commits }} + 2))" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: ${{ steps.depth.outputs.depth }}
+          fetch-tags: false
+          filter: blob:none
+
+      - name: Check for changes
+        id: check-changes
+        uses: ./.github/workflows/actions/changed-paths
+        with:
+          paths: src/ Dockerfile go.mod go.sum
+          checkout-depth: ${{ steps.depth.outputs.depth }}
+
+      - name: Skip security scan if no changes
+        if: ${{ steps.check-changes.outputs.changed == 'false' }}
+        run: |
+          echo "No changes detected in the specified paths."
+          echo "Security scan is not required."
+
+      - name: Set up Docker Buildx
+        if: ${{ steps.check-changes.outputs.changed == 'true' }}
+        uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
+
+      - name: Build image
+        if: ${{ steps.check-changes.outputs.changed == 'true' }}
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: .
+          load: true
+          tags: gotigram:security-scan
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Run Trivy vulnerability scanner
+        if: ${{ steps.check-changes.outputs.changed == 'true' }}
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: gotigram:security-scan
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'

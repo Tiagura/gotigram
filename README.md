@@ -154,7 +154,7 @@ export MYGID=$(id -g)
 docker compose -f docker-compose-local.yml up -d
 ```
 
-#### Using Docker Hub image
+#### Using GHCR (GitHub Container Registry) or Docker Hub image
 
 [Example file](docker-compose.yml)
 

@@ -1,6 +1,6 @@
 services:
   gotigram:
-    image: tiagura/gotigram:latest
+    image:  ghcr.io/tiagura/gotigram:latest # Also available on Docker Hub: tiagura/gotigram:latest
     container_name: gotigram
     user: "${MYUID}:${MYGID}"
     # Option 1: Use external .env file

@@ -1,0 +1,73 @@
+name: CI Quality Scan Code
+
+on:
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  code-quality:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Compute checkout depth
+        id: depth
+        run: |
+          echo "depth=$((${{ github.event.pull_request.commits }} + 2))" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: ${{ steps.depth.outputs.depth }}
+          fetch-tags: false
+          filter: blob:none
+
+      - name: Check for changes
+        id: check-changes
+        uses: ./.github/workflows/actions/changed-paths
+        with:
+          paths: src/ go.mod go.sum
+          checkout-depth: ${{ steps.depth.outputs.depth }}
+
+      - name: Set up Go
+        if: ${{ steps.check-changes.outputs.changed == 'true' }}
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check Go formatting
+        if: ${{ steps.check-changes.outputs.changed == 'true' }}
+        run: |
+          set -euo pipefail
+
+          UNFORMATTED=$(gofmt -l .)
+
+          if [ -n "$UNFORMATTED" ]; then
+            echo "::error::The following Go files are not formatted:"
+            echo "$UNFORMATTED"
+
+            echo ""
+            echo "Run the following locally:"
+            echo "  gofmt -w src"
+
+            exit 1
+          fi
+
+          echo "All Go files are correctly formatted."
+
+      # - name: Run go tests
+      #   if: ${{ steps.check-changes.outputs.changed == 'true' }}
+      #   run: go test ./...
+
+      - name: Run go vet
+        if: ${{ steps.check-changes.outputs.changed == 'true' }}
+        run: go vet ./...
