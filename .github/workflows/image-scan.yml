@@ -3,7 +3,7 @@ name: Image Vulnerability Scan
 on:
   push:
     branches:
-      - feat-ci-pipeline
+      - main
 
   schedule:
     # Every Sunday at 02:00 UTC
@@ -40,8 +40,9 @@ jobs:
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: gotigram:security-scan
-          format: sarif
-          output: trivy-results.sarif
+          format: 'template'
+          template: '@/contrib/sarif.tpl'
+          output: 'trivy-results.sarif'
           severity: CRITICAL,HIGH
           ignore-unfixed: true
 
